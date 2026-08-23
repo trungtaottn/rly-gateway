@@ -152,7 +152,7 @@ const nvidiaNemotronCapabilities = conservativeCapabilities();
 const deepSeekFlashCapabilities = conservativeCapabilities({ tools: false });
 const nvidiaNemotronNanoCapabilities = conservativeCapabilities({ images: true });
 const openAiGptOssCapabilities = conservativeCapabilities({ structuredOutput: true });
-const codexGpt54Capabilities = conservativeCapabilities();
+const codexGpt54Capabilities = conservativeCapabilities({ redactedReasoning: true });
 const clineSonnet45Capabilities = conservativeCapabilities();
 
 /** Fake-upstream Claude Code E2E evidence path for direct providers. */
@@ -226,6 +226,17 @@ export const directProviderRegistry: RegistryDocument = Object.freeze({
       accessProviderId: "openrouter", upstreamModelId: "openai/gpt-oss-20b:free", modelFamily: "openai",
       verifiedAt: "2026-08-13", fixtureVersion: "openai-chat-v1", capabilities: openAiGptOssCapabilities,
       compatibility: { evidenceRef: DIRECT_E2E_REF },
+    }),
+    reviewedModel({
+      accessProviderId: "openrouter",
+      upstreamModelId: "deepseek/deepseek-v4-flash-0731",
+      modelFamily: "deepseek",
+      verifiedAt: "2026-08-19",
+      fixtureVersion: "openai-chat-v1",
+      capabilities: conservativeCapabilities(),
+      // Catalog model.context_length (2026-08-19). Not top_provider.context_length.
+      limits: { contextWindow: 1_310_720, maxOutput: 393_216 },
+      compatibility: { evidenceRef: "catalog:openrouter/2026-08-19/deepseek-v4-flash-0731" },
     }),
     reviewedModel({
       accessProviderId: "deepseek", upstreamModelId: "deepseek-v4-flash", modelFamily: "deepseek",

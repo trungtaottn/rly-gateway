@@ -18,7 +18,7 @@ import {
   type DefinitionReconciliation,
 } from "../service-manager/reconcile.js";
 import type { ServiceManagerAdapter, ServiceDefinitionInput } from "../service-manager/types.js";
-import { readInstallation, writeInstallation } from "../storage/installation.js";
+import { persistUserInstallation, readInstallation } from "../storage/installation.js";
 import { LOG_DIRECTORY, resolveDefaultControlPlaneDirectory, SERVICE_LOG_NAME } from "../storage/paths.js";
 
 export type InitDependencies = Readonly<{
@@ -94,7 +94,7 @@ export async function runInit(configPath: string, dependencies: InitDependencies
   };
 
   if (!manager.isSupported()) {
-    await writeInstallation(controlPlaneDirectory, record);
+    await persistUserInstallation(home, controlPlaneDirectory, record);
     console.log(JSON.stringify({
       ok: true,
       initialized: true,
@@ -147,7 +147,7 @@ export async function runInit(configPath: string, dependencies: InitDependencies
   }
 
   await manager.start();
-  await writeInstallation(controlPlaneDirectory, {
+  await persistUserInstallation(home, controlPlaneDirectory, {
     ...record,
     bootstrapPath,
     ...(reconciliation.revision === undefined ? {} : { definitionRevision: reconciliation.revision }),

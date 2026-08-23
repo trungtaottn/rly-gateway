@@ -25,7 +25,7 @@ describe("control-plane migrations", () => {
 
     await expect(openMigratedDatabase(directory, [
       ...DEFAULT_MIGRATIONS,
-      { version: 3, checksum: "deadbeef", sql: "CREATE TABLE broken (id TEXT PRIMARY KEY);\nNOT VALID SQL" },
+      { version: 99, checksum: "deadbeef", sql: "CREATE TABLE broken (id TEXT PRIMARY KEY);\nNOT VALID SQL" },
     ])).rejects.toThrow("prior schema restored");
 
     const restored = await ControlPlaneStore.open(directory);

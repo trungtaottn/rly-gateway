@@ -14,7 +14,7 @@ import {
 
 export const RETENTION_POLICY_VERSION = 1;
 
-export type RetentionClassName = "logs" | "audit" | "continuation" | "backups" | "expiredCredentials";
+export type RetentionClassName = "logs" | "audit" | "continuation" | "backups" | "expiredCredentials" | "ledger";
 
 export type RetentionClass = Readonly<{
   owner: string;
@@ -34,6 +34,7 @@ export const DEFAULT_RETENTION_POLICY: RetentionPolicy = {
     continuation: { owner: "responses", maxAgeMs: 24 * 60 * 60 * 1000 },
     backups: { owner: "storage", maxAgeMs: 14 * 24 * 60 * 60 * 1000 },
     expiredCredentials: { owner: "credential-broker", maxAgeMs: 0 },
+    ledger: { owner: "ledger", maxAgeMs: 90 * 24 * 60 * 60 * 1000 },
   },
 };
 
@@ -52,7 +53,7 @@ export type RetentionRun = Readonly<{
   resumed: boolean;
 }>;
 
-const CLASS_ORDER: readonly RetentionClassName[] = ["logs", "audit", "continuation", "backups", "expiredCredentials"];
+const CLASS_ORDER: readonly RetentionClassName[] = ["logs", "audit", "continuation", "backups", "expiredCredentials", "ledger"];
 
 export function assertRetentionPolicy(policy: RetentionPolicy): void {
   if (policy.version < 1) throw new RetentionPolicyError("retention policy version is missing");
@@ -132,6 +133,14 @@ async function deleteExpiredCredentials(directory: string, cutoffMs: number): Pr
   return deleteOlderFiles(credentials.paths().credentialQuarantine, cutoffMs);
 }
 
+async function deleteOlderLedger(directory: string, cutoffMs: number): Promise<number> {
+  try {
+    const { pruneLedger } = await import("../ledger/sqlite.js");
+    const iso = new Date(cutoffMs).toISOString();
+    return await pruneLedger(directory, iso);
+  } catch { return 0; }
+}
+
 async function applyClass(
   directory: string,
   policy: RetentionPolicy,
@@ -151,6 +160,8 @@ async function applyClass(
       return deleteOlderAudit(directory, cutoff);
     case "expiredCredentials":
       return deleteExpiredCredentials(directory, cutoff);
+    case "ledger":
+      return deleteOlderLedger(directory, cutoff);
   }
 }
 

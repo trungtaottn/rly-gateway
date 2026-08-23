@@ -36,6 +36,8 @@ afterEach(async () => {
 });
 
 interface TraceShape {
+  sourceRule?: string;
+  selected?: unknown;
   intent?: { kind?: string; sourceSelector?: string; source?: string; tier?: string; alias?: string; modelId?: string; role?: string };
   tierResolution?: { requestedTier?: string; modelFamily?: string; selectedLogicalId?: string };
   modelSelection?: { selectedLogicalId?: string; source?: string };
@@ -159,6 +161,11 @@ describe("model-intent selector routing (#125)", () => {
     const unknownBody = unknown.json() as { error?: { type?: string; reason?: string } };
     expect(unknownBody.error?.type).toBe("role-unmapped");
     expect(unknownBody.error?.reason).toBe("unknown-namespace");
+    const unknownTrace = await latestTrace(token);
+    expect(unknownTrace.sourceRule).toBe("model-selection:unknown-namespace");
+    expect(unknownTrace.intent).toMatchObject({ sourceSelector: "rly-tier:gpt-5.6-sol" });
+    expect(unknownTrace.selected).toBeUndefined();
+    expect(JSON.stringify(unknownTrace)).not.toMatch(/authorization|prompt|secret/i);
 
     // 4. A persisted exact model id is classified as EXACT_CLIENT_MODEL and
     //    resolves through the profile role mapping — never as a tier.

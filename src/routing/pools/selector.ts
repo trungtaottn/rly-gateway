@@ -6,6 +6,7 @@ import type { CandidateAssessment } from "../eligibility/reasons.js";
 import { createDecisionTrace, toTraceCandidates } from "../eligibility/trace.js";
 import { assessAccount, assessPool, bindRoute, requirePool, sourceRuleFor } from "./assess.js";
 import { hashSessionKey, parseAffinity, type AffinityBinding, type AffinityStore, type ParsedAffinity } from "./affinity.js";
+import { computeScore, getAdaptiveHealthMap, shouldUseAdaptive } from "./adaptive.js";
 import {
   eligibleCandidates,
   orderByQuotaThenPin,
@@ -19,7 +20,7 @@ export type { SelectInput, SelectResult };
 
 export class RouteSelector {
   private readonly cursors = new Map<string, number>();
-  private tail: Promise<void> = Promise.resolve();
+  private readonly tails = new Map<string, Promise<void>>();
 
   public constructor(
     private readonly store: ControlPlaneStore,
@@ -36,9 +37,8 @@ export class RouteSelector {
   }
 
   public select(input: SelectInput): Promise<SelectResult> {
-    return this.serialize(() => this.selectLocked(input));
+    return this.serialize(input.poolId, () => this.selectLocked(input));
   }
-
   public revalidate(route: EffectiveRoute, input: Omit<SelectInput, "requestId" | "modelId" | "adapterId" | "role">): void {
     const now = this.clock();
     const pool = requirePool(input.policy, input.poolId);
@@ -111,6 +111,14 @@ export class RouteSelector {
     let eligible = eligibleCandidates(assessments, exclude);
     if (affinity.quotaAware) eligible = orderByQuotaThenPin(eligible);
     if (pool.strategy === "fill-first") return selectFillFirst(eligible);
+    if (pool.strategy === "adaptive") {
+      const healthMap = getAdaptiveHealthMap(this.store, eligible.map((candidate) => candidate.accountId));
+      if (shouldUseAdaptive(eligible, healthMap)) {
+        const sorted = [...eligible].sort((a, b) => computeScore(healthMap.get(a.accountId), a.quotaClass) - computeScore(healthMap.get(b.accountId), b.quotaClass));
+        return sorted[0];
+      }
+      return selectFillFirst(eligible);
+    }
     const picked = selectRoundRobin(eligible, this.cursors.get(pool.id) ?? 0);
     if (picked === undefined) return undefined;
     this.cursors.set(pool.id, picked.nextCursor);
@@ -136,9 +144,10 @@ export class RouteSelector {
     return undefined;
   }
 
-  private serialize<T>(work: () => Promise<T>): Promise<T> {
-    const run = this.tail.then(work, work);
-    this.tail = run.then(() => undefined, () => undefined);
+  private serialize<T>(poolId: string, work: () => Promise<T>): Promise<T> {
+    const tail = this.tails.get(poolId) ?? Promise.resolve();
+    const run = tail.then(work, work);
+    this.tails.set(poolId, run.then(() => undefined, () => undefined));
     return run;
   }
 }

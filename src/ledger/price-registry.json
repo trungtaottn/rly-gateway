@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "prices": [
+    {
+      "model": "openrouter/nvidia-nemotron-nano-9b-v2",
+      "inputPerMillion": 0.1,
+      "outputPerMillion": 0.3,
+      "effectiveFrom": "2026-01-01T00:00:00.000Z",
+      "snapshotId": "price-v1-nemotron-20260101"
+    },
+    {
+      "model": "openrouter/deepseek-v4-flash",
+      "inputPerMillion": 0.2,
+      "outputPerMillion": 0.6,
+      "effectiveFrom": "2026-01-01T00:00:00.000Z",
+      "snapshotId": "price-v1-deepseek-20260101"
+    }
+  ]
+}

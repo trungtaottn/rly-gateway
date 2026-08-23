@@ -89,6 +89,7 @@ describe("model registry", () => {
     expect(codex?.capabilities.streaming).toBe(true);
     expect(codex?.capabilities.tools).toBe(true);
     expect(codex?.capabilities.images).toBe(false);
+    expect(codex?.capabilities.redactedReasoning).toBe(true);
     const cline = directProviderRegistry.models.find((model) => model.logicalId === "cline/claude-sonnet-4-5");
     expect(cline?.capabilities.streaming).toBe(true);
     expect(cline?.capabilities.tools).toBe(true);
@@ -112,6 +113,25 @@ describe("model registry", () => {
       },
     });
     expect(routesFromConfig(config).size).toBe(0);
+  });
+
+  it("ships an EXPERIMENTAL OpenRouter DeepSeek V4 Flash 0731 row with catalog limits", () => {
+    const evidence = findModelEvidence(directProviderRegistry, "openrouter", "deepseek/deepseek-v4-flash-0731");
+    expect(evidence).toBeDefined();
+    expect(evidence?.compatibility.state).toBe("EXPERIMENTAL");
+    expect(evidence?.compatibility.baseline).toBe("claude-code-fake-upstream");
+    expect(evidence?.compatibility.evidenceRef).toBe("catalog:openrouter/2026-08-19/deepseek-v4-flash-0731");
+    expect(evidence?.compatibility.claimRef).toBeUndefined();
+    expect(evidence?.identity.modelFamily).toBe("deepseek");
+    expect(evidence?.limits).toEqual({ contextWindow: 1_310_720, maxOutput: 393_216 });
+    expect(evidence?.capabilities.streaming).toBe(true);
+    expect(evidence?.capabilities.tools).toBe(true);
+    const config = gatewayConfigSchema.parse({
+      schemaVersion: 1,
+      gateway: { port: 17871 },
+      routes: { primary: { provider: "openrouter", model: "deepseek/deepseek-v4-flash-0731", credential: "env:OPENROUTER_API_KEY" } },
+    });
+    expect(routesFromConfig(config).get("primary")?.modelId).toBe("deepseek/deepseek-v4-flash-0731");
   });
 
   it("matches Codex evidence only for exact provider and model ids", () => {
@@ -209,6 +229,7 @@ describe("provider model intelligence registry", () => {
       "openrouter/nvidia/nemotron-3.5-lightning:free",
       "openrouter/nvidia/nemotron-nano-12b-v2-vl:free",
       "openrouter/openai/gpt-oss-20b:free",
+      "openrouter/deepseek/deepseek-v4-flash-0731",
     ]);
     expect(modelsForProvider(directProviderRegistry, "openrouter").every((model) => model.identity.accessProviderId === "openrouter")).toBe(true);
     expect(modelsForFamily(directProviderRegistry, "nvidia").map((model) => model.logicalId)).toEqual([
@@ -222,6 +243,7 @@ describe("provider model intelligence registry", () => {
       "openrouter/nvidia/nemotron-3.5-lightning:free",
       "openrouter/nvidia/nemotron-nano-12b-v2-vl:free",
       "openrouter/openai/gpt-oss-20b:free",
+      "openrouter/deepseek/deepseek-v4-flash-0731",
       "codex/gpt-5.4",
       "cline/claude-sonnet-4-5",
       "cline/gpt-5.6-terra",
@@ -371,7 +393,7 @@ describe("provider model intelligence registry", () => {
     expect(proposal.proposed[0]?.observedLimits).toEqual({ contextWindow: 400_000 });
     // The trusted document is never mutated by discovery.
     expect(directProviderRegistry.models).toBe(before);
-    expect(directProviderRegistry.models).toHaveLength(11);
+    expect(directProviderRegistry.models).toHaveLength(12);
     expect(Object.isFrozen(directProviderRegistry.models)).toBe(true);
     expect(Object.isFrozen(directProviderRegistry)).toBe(true);
   });

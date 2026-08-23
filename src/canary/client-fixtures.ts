@@ -10,9 +10,9 @@ import type { ClientKind } from "./types.js";
  *
  * Baselines:
  * - `claude-code-2.1.229` is the pinned fixture baseline (protocol shapes and
- *   overlay composition). The observed local client (2.1.231, #71) is recorded
- *   in docs separately; the gated real-client E2E validates the plumbing on
- *   that observed client. Observed ≠ tested baseline.
+ *   overlay composition). The observed local client (`CLAUDE_CODE_OBSERVED_VERSION`,
+ *   currently 2.1.233) is recorded separately; observed ≠ supported baseline
+ *   because the installed canary did not send an effort signal.
  * - `codex-cli-0.147.0-alpha.6.5` is the observed provisional Codex target. It
  *   is NOT a tested baseline; only the OpenAI Responses boundary RLY ships
  *   (`rly run codex`) is pinned.
@@ -86,6 +86,12 @@ export type ClientContract = Readonly<{
 
 export const CLAUDE_CODE_FIXTURE_BASELINE = "claude-code-2.1.229";
 export const CODEX_CLI_OBSERVED_VERSION = "0.147.0-alpha.6.5";
+/**
+ * Observed installed Claude Code version. Observed ≠ supported baseline:
+ * `CLAUDE_CODE_CONTRACT.baseline` stays `claude-code-2.1.229` because the
+ * installed canary did not send an effort signal.
+ */
+export const CLAUDE_CODE_OBSERVED_VERSION = "2.1.233";
 
 /** Pinned supported Claude Code baseline contract. */
 export const CLAUDE_CODE_CONTRACT: ClientContract = Object.freeze({

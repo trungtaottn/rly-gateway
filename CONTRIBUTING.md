@@ -51,8 +51,7 @@ verified `dev` state into `main`.
 - Import credentials explicitly and read-only by default.
 - Do not mutate native Claude or Codex configuration globally.
 - Record substantial upstream adaptation in the machine-readable
-  [`provenance/`](./provenance/) inventory and retain the applicable notice in
-  [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md).
+  [`provenance/`](./provenance/) inventory.
 
 ## Verification
 

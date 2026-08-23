@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { FastifyInstance } from "fastify";
 import type { ProfileRecord } from "../control-plane/types.js";
 import type { ControlPlaneStore } from "../control-plane/store.js";
+import { toPlannedLaunchDto } from "../management/dtos.js";
 import type { ModelUniverseSnapshot, SessionPolicySnapshot } from "../routing/model-projection/types.js";
 import { ProfileActivationError } from "./errors.js";
 import { inspectLaunchableProfile } from "./activate.js";
@@ -70,6 +71,13 @@ export function registerLaunchSessionRoutes(
         profileId: profile.id,
         harness: profile.harness,
         launchPolicy,
+        planned: toPlannedLaunchDto({
+          provider: compiled.policy.provider,
+          pool: compiled.policy.pool,
+          modelRoles: compiled.policy.profile.modelRoles,
+          policyRevision: compiled.universe.policyRevision,
+          ...(typeof launchPolicy.model === "string" ? { launchPolicyModel: launchPolicy.model } : {}),
+        }),
         token,
       });
     } catch (error) {

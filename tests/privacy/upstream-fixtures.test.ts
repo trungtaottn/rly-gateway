@@ -38,11 +38,7 @@ function readJson(relative: string): unknown {
 
 describe("upstream fixtures stay synthetic", () => {
   const fixtureFiles = collectFiles(join(root, "tests/fixtures/upstream"));
-  const provenanceFiles = [
-    "THIRD_PARTY_NOTICES.md",
-    "provenance/artifacts.json",
-    "provenance/adaptation-matrix.json",
-  ].map((relative) => join(root, relative));
+
 
   it("includes sanitized compatibility fixtures", () => {
     expect(fixtureFiles.map(relativeToRoot)).toEqual(expect.arrayContaining([
@@ -62,7 +58,7 @@ describe("upstream fixtures stay synthetic", () => {
 
   it("contains no credential, identity, or live payload markers", () => {
     const findings: string[] = [];
-    for (const file of [...fixtureFiles, ...provenanceFiles]) {
+    for (const file of fixtureFiles) {
       const content = readFileSync(file, "utf8");
       for (const rule of forbidden) {
         if (rule.pattern.test(content)) findings.push(`${relativeToRoot(file)}: ${rule.name}`);

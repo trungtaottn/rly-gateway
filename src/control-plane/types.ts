@@ -2,7 +2,7 @@ import type { ProviderCapabilityEvidence } from "../registry/model-registry.js";
 
 export type IntegrationMode = "direct" | "oauth" | "bridge";
 export type AccountState = "ready" | "paused" | "unready" | "revoked";
-export type PoolStrategy = "manual" | "round-robin" | "fill-first";
+export type PoolStrategy = "manual" | "round-robin" | "fill-first" | "adaptive";
 export type HarnessName = "claude" | "codex";
 export type ManagementActor = "cli" | "browser" | "system";
 export type AuditResult = "ok" | "rejected";

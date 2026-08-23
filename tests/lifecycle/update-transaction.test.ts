@@ -15,7 +15,7 @@ import { UpdateStateStore } from "../../src/runtime/update/store.js";
 import type { CandidateManifest, UpdateStateRecord, UpdateTransaction } from "../../src/runtime/update/types.js";
 import { RUNTIME_VERSION } from "../../src/runtime/gateway-attestation.js";
 import type { ServiceManagerAdapter, ServiceStatus } from "../../src/service-manager/types.js";
-import { SCHEMA_V2_VERSION } from "../../src/storage/schema-v2.js";
+import { SCHEMA_V4_VERSION } from "../../src/storage/schema-v4.js";
 
 const directories: string[] = [];
 const servers: Server[] = [];
@@ -70,7 +70,7 @@ async function candidateDir(root: string, version: string, migrationClass = "bac
   await chmod(join(source, "dist"), 0o700);
   await chmod(join(source, "dist", "cli"), 0o700);
   await writeFile(join(source, "dist", "cli", "main.js"), `// rly ${version}\n`, "utf8");
-  await writeFile(join(source, "rly.json"), `${JSON.stringify({ product: "rly-gateway", version, stateVersion: 2, migrationClass })}\n`, "utf8");
+  await writeFile(join(source, "rly.json"), `${JSON.stringify({ product: "rly-gateway", version, stateVersion: 4, migrationClass })}\n`, "utf8");
   return source;
 }
 
@@ -214,7 +214,7 @@ describe("transactional activation crash recovery (#93, real refs)", () => {
       serviceDefinition: { serviceName: "rly-gateway", executable: "/usr/bin/node", entrypoint: join(controlPlaneDir, "runtime", "refs", "active", "dist", "cli", "main.js"), configPath: "/work/gateway.config.toml" },
       updateStore: store,
       cliRuntimeVersion: RUNTIME_VERSION,
-      cliStateVersion: SCHEMA_V2_VERSION,
+      cliStateVersion: SCHEMA_V4_VERSION,
     });
     expect(result.outcome).toBe("activated");
     expect(result.state).toBe("active");
@@ -253,7 +253,7 @@ describe("transactional activation crash recovery (#93, real refs)", () => {
       serviceManager: manager,
       updateStore: store,
       cliRuntimeVersion: RUNTIME_VERSION,
-      cliStateVersion: SCHEMA_V2_VERSION,
+      cliStateVersion: SCHEMA_V4_VERSION,
     });
     expect(result.outcome).toBe("rolled-back");
     expect(result.state).toBe("active");
@@ -301,7 +301,7 @@ describe("transactional activation crash recovery (#93, real refs)", () => {
       serviceManager: manager,
       updateStore: store,
       cliRuntimeVersion: RUNTIME_VERSION,
-      cliStateVersion: SCHEMA_V2_VERSION,
+      cliStateVersion: SCHEMA_V4_VERSION,
     });
     expect(result.outcome).toBe("rolled-back");
     expect(result.state).toBe("active");
@@ -343,7 +343,7 @@ describe("transactional activation crash recovery (#93, real refs)", () => {
       serviceManager: manager,
       updateStore: store,
       cliRuntimeVersion: RUNTIME_VERSION,
-      cliStateVersion: SCHEMA_V2_VERSION,
+      cliStateVersion: SCHEMA_V4_VERSION,
     });
     expect(result.outcome).toBe("rolled-back");
     expect(result.state).toBe("active");
@@ -389,7 +389,7 @@ describe("transactional activation crash recovery (#93, real refs)", () => {
       serviceManager: manager,
       updateStore: store,
       cliRuntimeVersion: RUNTIME_VERSION,
-      cliStateVersion: SCHEMA_V2_VERSION,
+      cliStateVersion: SCHEMA_V4_VERSION,
     });
     expect(result.outcome).toBe("rolled-back");
     expect(result.state).toBe("active");
@@ -427,7 +427,7 @@ describe("transactional activation crash recovery (#93, real refs)", () => {
       serviceManager: manager,
       updateStore: store,
       cliRuntimeVersion: RUNTIME_VERSION,
-      cliStateVersion: SCHEMA_V2_VERSION,
+      cliStateVersion: SCHEMA_V4_VERSION,
     });
     // Durable commit ⇒ nothing to do; no rollback, no restart.
     expect(result.outcome).toBe("no-candidate");
@@ -471,7 +471,7 @@ describe("transactional activation crash recovery (#93, real refs)", () => {
       serviceManager: manager,
       updateStore: store,
       cliRuntimeVersion: RUNTIME_VERSION,
-      cliStateVersion: SCHEMA_V2_VERSION,
+      cliStateVersion: SCHEMA_V4_VERSION,
     });
     expect(first.outcome).toBe("failed");
     expect(first.state).toBe("recovery-required");
@@ -488,7 +488,7 @@ describe("transactional activation crash recovery (#93, real refs)", () => {
       serviceManager: manager,
       updateStore: store,
       cliRuntimeVersion: RUNTIME_VERSION,
-      cliStateVersion: SCHEMA_V2_VERSION,
+      cliStateVersion: SCHEMA_V4_VERSION,
     });
     expect(second.outcome).toBe("failed");
     expect(second.state).toBe("recovery-required");
@@ -529,7 +529,7 @@ describe("transactional activation crash recovery (#93, real refs)", () => {
       serviceManager: manager,
       updateStore: store,
       cliRuntimeVersion: RUNTIME_VERSION,
-      cliStateVersion: SCHEMA_V2_VERSION,
+      cliStateVersion: SCHEMA_V4_VERSION,
     });
     expect(result.outcome).toBe("failed");
     expect(result.state).toBe("recovery-required");
@@ -574,7 +574,7 @@ describe("transactional activation crash recovery (#93, real refs)", () => {
       serviceManager: manager,
       updateStore: store,
       cliRuntimeVersion: RUNTIME_VERSION,
-      cliStateVersion: SCHEMA_V2_VERSION,
+      cliStateVersion: SCHEMA_V4_VERSION,
     });
     expect(result.outcome).toBe("rolled-back");
     expect(await readlink(installer.activePath)).toBe(`../versions/${id1}`);
@@ -594,7 +594,7 @@ describe("transactional activation crash recovery (#93, real refs)", () => {
       candidate: { version: "3.0.0", sourceDirectory: src3 },
       updateStore: store,
       cliRuntimeVersion: RUNTIME_VERSION,
-      cliStateVersion: SCHEMA_V2_VERSION,
+      cliStateVersion: SCHEMA_V4_VERSION,
     });
     expect(again.outcome).toBe("activated");
     expect(await harness.versionOf()).toBe("3.0.0");
@@ -638,7 +638,7 @@ describe("transactional activation gates (#93)", () => {
       candidate: { version: "2.0.0", sourceDirectory: src2 },
       updateStore: store,
       cliRuntimeVersion: RUNTIME_VERSION,
-      cliStateVersion: SCHEMA_V2_VERSION,
+      cliStateVersion: SCHEMA_V4_VERSION,
     });
     if (expected === "blocked") {
       expect(result.outcome).toBe("failed");
@@ -686,7 +686,7 @@ describe("transactional activation gates (#93)", () => {
     await installer.activateStaged();
     const src2 = await candidateDir(root, "2.0.0");
     // Rewrite the manifest with only the legacy signal (no migrationClass).
-    await writeFile(join(src2, "rly.json"), `${JSON.stringify({ product: "rly-gateway", version: "2.0.0", stateVersion: 2, migrationForwardOnly: false })}\n`, "utf8");
+    await writeFile(join(src2, "rly.json"), `${JSON.stringify({ product: "rly-gateway", version: "2.0.0", stateVersion: 4, migrationForwardOnly: false })}\n`, "utf8");
     await installer.installCandidate({ version: "2.0.0", sourceDirectory: src2 });
     const manager = new FakeServiceManager(async () => { await harness.restartTo("2.0.0"); });
     const store = new UpdateStateStore(controlPlaneDir);
@@ -700,7 +700,7 @@ describe("transactional activation gates (#93)", () => {
       candidate: { version: "2.0.0", sourceDirectory: src2 },
       updateStore: store,
       cliRuntimeVersion: RUNTIME_VERSION,
-      cliStateVersion: SCHEMA_V2_VERSION,
+      cliStateVersion: SCHEMA_V4_VERSION,
     });
     expect(result.outcome).toBe("activated");
     await harness.current.shutdown();
@@ -733,7 +733,7 @@ describe("transactional activation gates (#93)", () => {
       drainTimeoutMs: 300,
       drainPollMs: 50,
       cliRuntimeVersion: RUNTIME_VERSION,
-      cliStateVersion: SCHEMA_V2_VERSION,
+      cliStateVersion: SCHEMA_V4_VERSION,
     });
     expect(pending.outcome).toBe("pending");
     expect(pending.phase).toBe("draining");
@@ -769,7 +769,7 @@ describe("transactional activation gates (#93)", () => {
       serviceDefinition: { serviceName: "rly-gateway", executable: "/usr/bin/node", entrypoint: join(controlPlaneDir, "runtime", "refs", "active", "dist", "cli", "main.js"), configPath: "/work/gateway.config.toml" },
       updateStore: store,
       cliRuntimeVersion: RUNTIME_VERSION,
-      cliStateVersion: SCHEMA_V2_VERSION,
+      cliStateVersion: SCHEMA_V4_VERSION,
     });
     expect(activated.outcome).toBe("activated");
     expect(activated.phase).toBe("committed");
@@ -850,7 +850,7 @@ describe("drain gate fail-closed (#J7)", () => {
       serviceManager: h.manager,
       updateStore: h.store,
       cliRuntimeVersion: RUNTIME_VERSION,
-      cliStateVersion: SCHEMA_V2_VERSION,
+      cliStateVersion: SCHEMA_V4_VERSION,
       ...overrides,
     };
   }

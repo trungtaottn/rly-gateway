@@ -34,15 +34,30 @@ describe("manual oauth route", () => {
       choices: [{ finish_reason: "stop", message: { content: "fixture text" } }],
     }), { status: 200 }));
     const resolve = createCodexOauthRouteResolver(service, broker, "a".repeat(64), fetch, "http://127.0.0.1:9");
-    const request = decodeAnthropicRequest({ model: "fixture-model", max_tokens: 8, messages: [{ role: "user", content: "fixture" }] }).request;
+    const request = decodeAnthropicRequest({ model: "gpt-5.4", max_tokens: 8, messages: [{ role: "user", content: "fixture" }] }).request;
     const resolved = await resolve(request);
     expect(resolved?.route.adapterId).toBe("codex-oauth");
+    expect(resolved?.route.capabilities.redactedReasoning).toBe(true);
+    expect(resolved?.route.reasoningEvidence?.supported).toBe(true);
     const events = [];
     if (!resolved) throw new Error("expected oauth route");
     for await (const event of resolved.upstream.invoke(request, new AbortController().signal)) events.push(event);
     expect(events.some((event) => event.type === "response-completed")).toBe(true);
     const headers = fetch.mock.calls[0]?.[1]?.headers as Record<string, string> | undefined;
     expect(headers?.authorization).toBe("Bearer " + "access-token-fixture-not-secret");
+    store.close();
+    await broker.close();
+  });
+
+  it("fails closed when the requested Codex model is not in the registry", async () => {
+    const directory = await tempDirectory("rly-gateway-oauth-unknown-");
+    directories.push(directory);
+    const store = await ControlPlaneStore.open(directory);
+    const broker = await CredentialBroker.open(directory, { oauth: fakeOauth() });
+    const service = new CredentialService(store, broker);
+    const resolve = createCodexOauthRouteResolver(service, broker, "a".repeat(64), fetch, "http://127.0.0.1:9");
+    const request = decodeAnthropicRequest({ model: "fixture-model", max_tokens: 8, messages: [{ role: "user", content: "fixture" }] }).request;
+    await expect(resolve(request)).resolves.toBeUndefined();
     store.close();
     await broker.close();
   });
@@ -74,7 +89,7 @@ describe("manual oauth route", () => {
       choices: [{ finish_reason: "stop", message: { content: "fixture text" } }],
     }), { status: 200 }));
     const resolve = createCodexOauthRouteResolver(service, broker, "a".repeat(64), fetch, "http://127.0.0.1:9");
-    const request = decodeAnthropicRequest({ model: "fixture-model", max_tokens: 8, messages: [{ role: "user", content: "fixture" }] }).request;
+    const request = decodeAnthropicRequest({ model: "gpt-5.4", max_tokens: 8, messages: [{ role: "user", content: "fixture" }] }).request;
     expect(oauth.refreshCalls).toBe(0);
     const resolved = await resolve(request);
     expect(oauth.refreshCalls).toBe(1);

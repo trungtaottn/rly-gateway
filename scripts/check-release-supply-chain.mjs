@@ -32,10 +32,10 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
  * updating BOTH this map and the workflow `uses:` lines.
  */
 const PINNED_ACTIONS = {
-  "actions/checkout@11d5960a326750d5838078e36cf38b85af677262": "actions/checkout v4 (reviewed tag commit)",
-  "pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1": "pnpm/action-setup v4 (reviewed tag commit)",
-  "actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020": "actions/setup-node v4 (reviewed tag commit)",
-  "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02": "actions/upload-artifact v4 (reviewed tag commit)",
+  "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1": "actions/checkout v7.0.1 (reviewed tag commit, node24)",
+  "pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86": "pnpm/action-setup v6.0.10 (reviewed tag commit, node24)",
+  "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020": "actions/setup-node v7.0.0 (reviewed tag commit, node24)",
+  "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a": "actions/upload-artifact v7.0.1 (reviewed tag commit, node24)",
   "actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1": "actions/create-github-app-token v3 (reviewed tag commit)",
 };
 

@@ -1,22 +1,15 @@
 import type { CanonicalEvent } from "../../../core/canonical-event.js";
 import type { CanonicalRequest } from "../../../core/canonical-request.js";
-import { decideRoute, type RouteRecord } from "../../../core/router.js";
+import { reasoningRequestFromWire, type ResolvedReasoning } from "../../../core/reasoning.js";
+import { decideRoute, UnsupportedRouteError, type RouteRecord } from "../../../core/router.js";
 import type { CredentialBroker } from "../../../credentials/broker.js";
 import type { CredentialService } from "../../../credentials/service.js";
 import { conservativeTokenCount } from "../../../core/token-counting.js";
 import type { CanonicalUpstream } from "../../../protocols/anthropic/fake-upstream.js";
-import { CodexOAuthAdapter, CODEX_OAUTH_ADAPTER_ID } from "./adapter.js";
-
-const CODEX_CAPABILITIES = Object.freeze({
-  streaming: true,
-  tools: true,
-  parallelTools: false,
-  images: false,
-  reasoning: true,
-  redactedReasoning: false,
-  structuredOutput: false,
-  tokenCounting: "conservative-estimate" as const,
-});
+import { directProviderRegistry, findModelEvidence } from "../../../registry/model-registry.js";
+import { providerContract } from "../../catalog.js";
+import { ReasoningTranslationError, resolveReasoning } from "../../reasoning.js";
+import { CodexOAuthAdapter } from "./adapter.js";
 
 export type ResolvedOauthRoute = Readonly<{ route: RouteRecord; upstream: CanonicalUpstream }>;
 
@@ -28,6 +21,10 @@ export function createCodexOauthRouteResolver(
   endpoint?: string,
 ): (canonical: CanonicalRequest) => Promise<ResolvedOauthRoute | undefined> {
   return async (canonical) => {
+    const contract = providerContract("codex");
+    if (!contract || contract.integrationMode !== "oauth") return undefined;
+    const evidence = findModelEvidence(directProviderRegistry, "codex", canonical.requestedModel);
+    if (evidence === undefined) return undefined;
     const account = await credentials.resolveSelected();
     if (!account) return undefined;
     const prepared = await broker.prepare(account.credentialHandle);
@@ -35,10 +32,12 @@ export function createCodexOauthRouteResolver(
       role: "primary",
       providerId: "codex",
       modelId: canonical.requestedModel,
-      adapterId: CODEX_OAUTH_ADAPTER_ID,
+      adapterId: contract.adapterId,
       credentialRef: { kind: "handle", handle: account.credentialHandle },
-      capabilities: CODEX_CAPABILITIES,
+      capabilities: evidence.capabilities,
+      reasoningEvidence: evidence.reasoning,
     };
+    const resolvedReasoning = resolvedFor(route, canonical);
     const decision = decideRoute({
       requestId: canonical.id,
       route,
@@ -46,6 +45,7 @@ export function createCodexOauthRouteResolver(
       configFingerprint,
       accountPseudonym: account.pseudonym,
       credentialGeneration: prepared.generation,
+      ...(resolvedReasoning === undefined ? {} : { resolvedReasoning }),
     });
     return {
       route,
@@ -63,4 +63,22 @@ export function createCodexOauthRouteResolver(
       },
     };
   };
+}
+
+/**
+ * #70: translates the canonical reasoning intent for a registry-backed Codex
+ * OAuth route through the provider-owned boundary. Untranslatable explicit
+ * intents fail closed on the existing unsupported-route contract.
+ */
+function resolvedFor(route: RouteRecord, request: CanonicalRequest): ResolvedReasoning | undefined {
+  if (route.reasoningEvidence === undefined) return undefined;
+  const reasoningRequest = request.inference.reasoning ?? reasoningRequestFromWire({});
+  try {
+    return resolveReasoning(reasoningRequest, route.reasoningEvidence);
+  } catch (error) {
+    if (error instanceof ReasoningTranslationError) {
+      throw new UnsupportedRouteError(["reasoning"]);
+    }
+    throw error;
+  }
 }

@@ -68,6 +68,20 @@ describe("canary evidence and classification (#24, claim/evidence v2 by #122)", 
     }
   });
 
+  it("accepts reviewed VERIFIED evidence on the registry contract", () => {
+    const evidence = evidenceFor("codex", "gpt-5.4", "VERIFIED", {
+      evidenceLayer: "C",
+      reason: "reviewed-compatibility-claim",
+    });
+    const proposal = proposeCanaryState(evidence, directProviderRegistry);
+    expect(proposal).toBeDefined();
+    expect(proposal?.proposedState).toBe("VERIFIED");
+    expect(proposal?.currentState).toBe("EXPERIMENTAL");
+    expect(proposal?.evidenceRef).toContain("canary-layer-a:");
+    expect(verdictToCompatibilityState("VERIFIED")).toBe("VERIFIED");
+  });
+
+
   it("classifies BROKEN when a required gate fails with the typed reason", () => {
     const classified = classifyVerdict({
       results: [

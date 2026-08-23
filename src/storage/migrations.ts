@@ -6,6 +6,7 @@ import { backup, DatabaseSync } from "node:sqlite";
 import { acquireOwnershipLock, OwnershipLockError } from "./ownership-lock.js";
 import { SCHEMA_V1_CHECKSUM, SCHEMA_V1_SQL, SCHEMA_VERSION, assertSchemaHasNoSecretColumns } from "./schema-v1.js";
 import { SCHEMA_V2_CHECKSUM, SCHEMA_V2_SQL, SCHEMA_V2_VERSION } from "./schema-v2.js";
+import { SCHEMA_V4_CHECKSUM, SCHEMA_V4_SQL, SCHEMA_V4_VERSION } from "./schema-v4.js";
 import { controlPlanePaths } from "./paths.js";
 import {
   chmodPrivateFile,
@@ -21,10 +22,10 @@ export type Migration = Readonly<{
   checksum: string;
   sql: string;
 }>;
-
 export const DEFAULT_MIGRATIONS: readonly Migration[] = [
   { version: SCHEMA_VERSION, checksum: SCHEMA_V1_CHECKSUM, sql: SCHEMA_V1_SQL },
   { version: SCHEMA_V2_VERSION, checksum: SCHEMA_V2_CHECKSUM, sql: SCHEMA_V2_SQL },
+  { version: SCHEMA_V4_VERSION, checksum: SCHEMA_V4_CHECKSUM, sql: SCHEMA_V4_SQL },
 ];
 
 type MigrationMarker = Readonly<{

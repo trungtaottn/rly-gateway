@@ -113,6 +113,10 @@ export type ModelProjection = Readonly<{
   effectiveLabel?: string;
   /** Registry evidence date; also drives the discovery `created_at` field. */
   verifiedAt: string;
+  /** Evidenced context window; omitted when the registry row has no number. */
+  contextWindow?: number;
+  /** Evidenced max output tokens; omitted when the registry row has no number. */
+  maxOutput?: number;
 }>;
 
 /**

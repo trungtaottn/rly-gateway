@@ -1,14 +1,31 @@
-import { mkdtemp, mkdir, readFile, rm, unlink, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, symlink, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { parseInstallArgs, runInstallCommand } from "../../src/cli/install.js";
+import { installUserLauncherSymlink, parseInstallArgs, runInstallCommand } from "../../src/cli/install.js";
 import { runUninstallCommand } from "../../src/cli/uninstall.js";
 import { DEFAULT_ORIGIN } from "../../src/installer/metadata.js";
 import { writeInstallation } from "../../src/storage/installation.js";
 import { RUNTIME_VERSION } from "../../src/runtime/gateway-attestation.js";
 import type { VerifiedCandidate } from "../../src/installer/types.js";
 import type { ServiceManagerAdapter } from "../../src/service-manager/types.js";
+
+const plantForeignLauncher: { path: string | undefined } = { path: undefined };
+
+vi.mock("node:fs/promises", async (importOriginal) => {
+  // eslint-disable-next-line @typescript-eslint/consistent-type-imports
+  const actual = await importOriginal<typeof import("node:fs/promises")>();
+  return {
+    ...actual,
+    symlink: async (target: string, path: string, type?: string) => {
+      if (plantForeignLauncher.path !== undefined && path.includes(".tmp")) {
+        await actual.writeFile(plantForeignLauncher.path, "foreign-race\n", { mode: 0o755 });
+      }
+      if (type === undefined) return actual.symlink(target, path);
+      return actual.symlink(target, path, type);
+    },
+  };
+});
 
 const directories: string[] = [];
 
@@ -19,6 +36,7 @@ async function directory(prefix = "rly-install-cli-"): Promise<string> {
 }
 
 afterEach(async () => {
+  plantForeignLauncher.path = undefined;
   vi.restoreAllMocks();
   await Promise.all(directories.splice(0).map((path) => rm(path, { recursive: true, force: true })));
 });
@@ -268,4 +286,64 @@ describe("rly install CLI (#129)", () => {
     expect(log[0]?.kind).toBe("install");
     expect(JSON.stringify(log[0])).not.toMatch(/Bearer|token|api[_-]?key|authorization|@/i);
   });
+
+  it("refuses a foreign launcher symlink before firstInstall/runInit", async () => {
+    const homeDir = await directory("rly-home-");
+    await mkdir(join(homeDir, ".local", "bin"), { recursive: true, mode: 0o755 });
+    await symlink("/usr/bin/true", join(homeDir, ".local", "bin", "rly"));
+    const output = vi.fn();
+    vi.spyOn(console, "log").mockImplementation(output);
+    const runInit = vi.fn().mockResolvedValue(0);
+    const code = await runInstallCommand(
+      { configPath: "/work/gateway.config.toml", channel: "beta", channelExplicit: true, origin: DEFAULT_ORIGIN, home: homeDir },
+      { acquire: vi.fn().mockResolvedValue(candidate()), runInit },
+    );
+    expect(code).toBe(1);
+    expect(runInit).not.toHaveBeenCalled();
+    const payload = JSON.parse(String(output.mock.calls.at(-1)?.[0])) as { ok: boolean; error: string; service?: { registered?: boolean } };
+    expect(payload.ok).toBe(false);
+    expect(payload.error).toContain("not RLY-owned");
+    expect(payload.service?.registered).not.toBe(true);
+    const { readlink } = await import("node:fs/promises");
+    await expect(readlink(join(homeDir, ".local", "bin", "rly"))).resolves.toBe("/usr/bin/true");
+  });
+
+  it("returns structured JSON for a regular-file launcher instead of throwing EINVAL", async () => {
+    const homeDir = await directory("rly-home-");
+    const linkPath = join(homeDir, ".local", "bin", "rly");
+    await mkdir(join(homeDir, ".local", "bin"), { recursive: true, mode: 0o755 });
+    await writeFile(linkPath, "#!/bin/sh\necho foreign\n", { mode: 0o755 });
+    const output = vi.fn();
+    vi.spyOn(console, "log").mockImplementation(output);
+    const runInit = vi.fn().mockResolvedValue(0);
+    const code = await runInstallCommand(
+      { configPath: "/work/gateway.config.toml", channel: "beta", channelExplicit: true, origin: DEFAULT_ORIGIN, home: homeDir },
+      { acquire: vi.fn().mockResolvedValue(candidate()), runInit },
+    );
+    expect(code).toBe(1);
+    expect(runInit).not.toHaveBeenCalled();
+    const printed = String(output.mock.calls.at(-1)?.[0]);
+    expect(printed).not.toContain("EINVAL");
+    const payload = JSON.parse(printed) as { ok: boolean; error: string };
+    expect(payload.ok).toBe(false);
+    expect(payload.error).toContain("not RLY-owned");
+    await expect(readFile(linkPath, "utf8")).resolves.toContain("foreign");
+    const launcher = await installUserLauncherSymlink({ home: homeDir, controlPlaneDirectory: join(homeDir, ".rly") });
+    expect(launcher.foreign).toBe(true);
+    expect(launcher.created).toBe(false);
+    await expect(readFile(linkPath, "utf8")).resolves.toContain("foreign");
+  });
+
+  it("does not overwrite a foreign file that appears before launcher rename", async () => {
+    const homeDir = await directory("rly-home-");
+    const controlPlaneDirectory = join(homeDir, ".rly");
+    const linkPath = join(homeDir, ".local", "bin", "rly");
+    await mkdir(join(homeDir, ".local", "bin"), { recursive: true, mode: 0o755 });
+    plantForeignLauncher.path = linkPath;
+    const result = await installUserLauncherSymlink({ home: homeDir, controlPlaneDirectory });
+    expect(result.foreign).toBe(true);
+    expect(result.created).toBe(false);
+    await expect(readFile(linkPath, "utf8")).resolves.toBe("foreign-race\n");
+  });
+
 });

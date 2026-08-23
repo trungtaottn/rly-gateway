@@ -3,13 +3,21 @@ name: Standalone Artifacts
 # RLY-owned primary distribution (#35 + #128): builds the standalone runtime
 # artifact matrix from a clean compiled tree, bundles the pinned Node runtime,
 # enforces the positive allowlist + absence checks, runs the `rly --version`
-# smoke on the supported CI target (linux-x64), QUALIFIES the exact artifact
-# bytes (exact-byte qualification is the publication authority), and publishes
-# the SIGNED release supply chain (canonical release manifest, per-artifact
-# SBOM + provenance, Ed25519 signatures, signed channel metadata). Experimental
-# targets (darwin-arm64, darwin-x64, linux-arm64) are built explicitly but are
-# not smoke/qualification-tested here (no qualified runner); they are recorded
-# as experimental gaps and never masquerade as stable qualification.
+# smoke on matching CI hosts, QUALIFIES the exact artifact bytes (exact-byte
+# qualification is the publication authority), and publishes the SIGNED release
+# supply chain (canonical release manifest, per-artifact SBOM + provenance,
+# Ed25519 signatures, signed channel metadata).
+#
+# Topology (one reusable job, two runners):
+#   - linux-x64 on ubuntu-latest builds/qualifies/signs linux-x64 as today
+#     for Stable and is the only job that publishes/uploads/attaches Stable
+#     assets. Beta/manual may still build experimental targets here.
+#   - linux-arm64 on ubuntu-24.04-arm builds ONLY linux-arm64, verifies the
+#     unpacked tarball, and runs exact-byte qualification on a matching
+#     runner. It never publishes Stable assets and does not enable lingering.
+#   darwin-arm64 and darwin-x64 remain experimental (no qualified macOS
+#   runner). linux-arm64 stays experimental for Stable publication until
+#   systemd user-manager qualification is accepted.
 #
 # Triggered by a GitHub Release publication (the canonical artifact lineage:
 # the release tag IS the version input, so package.json/tag/runtime identity
@@ -48,16 +56,27 @@ permissions:
 
 jobs:
   artifacts:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - id: linux-x64
+            runner: ubuntu-latest
+            publish: "true"
+          - id: linux-arm64
+            runner: ubuntu-24.04-arm
+            publish: "false"
+    name: ${{ matrix.id }}
+    runs-on: ${{ matrix.runner }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           fetch-depth: 0
           ref: ${{ github.event.release && github.event.release.tag_name || github.ref }}
-      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
         with:
           version: 11.16.0
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: 24
           cache: pnpm
@@ -85,16 +104,20 @@ jobs:
           RLY_RELEASE_VERSION: ${{ steps.version.outputs.version }}
           RLY_RELEASE_CHANNEL: ${{ steps.version.outputs.channel }}
           INPUT_TARGETS: ${{ inputs.targets || '' }}
+          JOB_ID: ${{ matrix.id }}
+          PUBLISH: ${{ matrix.publish }}
         run: |
           TARGETS="${INPUT_TARGETS:-}"
-          if [ -z "${TARGETS}" ]; then
+          if [ "${JOB_ID}" = "linux-arm64" ]; then
+            TARGETS="linux-arm64"
+          elif [ -z "${TARGETS}" ]; then
             if [ "${RLY_RELEASE_CHANNEL}" = "stable" ]; then
               TARGETS="linux-x64"
             else
               TARGETS="all"
             fi
           fi
-          if [ "${RLY_RELEASE_CHANNEL}" = "stable" ] && [ "${TARGETS}" != "linux-x64" ]; then
+          if [ "${PUBLISH}" = "true" ] && [ "${RLY_RELEASE_CHANNEL}" = "stable" ] && [ "${TARGETS}" != "linux-x64" ]; then
             echo "Stable publication on ubuntu-latest is restricted to the qualified linux-x64 target; requested: ${TARGETS}" >&2
             exit 1
           fi
@@ -115,6 +138,7 @@ jobs:
             node scripts/standalone/verify-artifact.mjs --artifact "$TMP/$target_dir" --expected-version "${VERSION}" --smoke
           done
       - name: Sign exact artifact bytes before qualification
+        if: ${{ matrix.publish == 'true' }}
         env:
           RLY_RELEASE_SIGNING_KEY: ${{ secrets.RLY_RELEASE_SIGNING_KEY }}
         run: |
@@ -122,7 +146,7 @@ jobs:
             --release-dir out/standalone \
             --signing-key env:RLY_RELEASE_SIGNING_KEY
       - name: Provision the user service manager for Stable qualification
-        if: ${{ steps.version.outputs.channel == 'stable' }}
+        if: ${{ matrix.publish == 'true' && steps.version.outputs.channel == 'stable' }}
         run: |
           set -euo pipefail
           USER_ID="$(id -u)"
@@ -153,13 +177,14 @@ jobs:
             node scripts/release/qualify.mjs --release-dir out/standalone --target "${target}" --version "${VERSION}" --channel "${CHANNEL}"
           done
       - name: Clean up the qualification service manager state
-        if: ${{ always() && steps.version.outputs.channel == 'stable' }}
+        if: ${{ always() && matrix.publish == 'true' && steps.version.outputs.channel == 'stable' }}
         run: |
           systemctl --user disable --now rly-gateway.service || true
           rm -f "$HOME/.config/systemd/user/rly-gateway.service"
           systemctl --user daemon-reload || true
           sudo loginctl disable-linger "$USER" || true
       - name: Publish signed release supply chain (manifest, SBOM, provenance, signatures, channel metadata)
+        if: ${{ matrix.publish == 'true' }}
         env:
           RLY_RELEASE_VERSION: ${{ steps.version.outputs.version }}
           RLY_RELEASE_CHANNEL: ${{ steps.version.outputs.channel }}
@@ -179,6 +204,7 @@ jobs:
             --qualification out/standalone/rly-qualification.json \
             --verbose
       - name: Verify signed release supply chain
+        if: ${{ matrix.publish == 'true' }}
         env:
           RLY_RELEASE_VERSION: ${{ steps.version.outputs.version }}
           RLY_RELEASE_CHANNEL: ${{ steps.version.outputs.channel }}
@@ -188,13 +214,14 @@ jobs:
             --channel "${RLY_RELEASE_CHANNEL}" \
             --verbose
       - name: Upload artifact matrix + release supply chain
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: ${{ matrix.publish == 'true' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: rly-standalone-${{ steps.version.outputs.version }}
           path: out/standalone/**
           if-no-files-found: error
       - name: Attach artifacts to the GitHub Release
-        if: ${{ github.event_name == 'release' }}
+        if: ${{ matrix.publish == 'true' && github.event_name == 'release' }}
         env:
           GITHUB_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.event.release.tag_name }}

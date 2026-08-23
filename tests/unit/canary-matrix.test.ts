@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { CLAUDE_CODE_CONTRACT } from "../../src/canary/client-fixtures.js";
+import { CLAUDE_CODE_CONTRACT, CLAUDE_CODE_OBSERVED_VERSION } from "../../src/canary/client-fixtures.js";
 import { runGateMatrix, runSingleGate, type MatrixInput } from "../../src/canary/matrix.js";
 import { adapterIdForProvider } from "../../src/canary/run.js";
 import { CANARY_GATES, type CanaryGate } from "../../src/canary/types.js";
@@ -32,6 +32,12 @@ function statusFor(results: readonly ReturnType<typeof runGateMatrix>[number][],
 }
 
 describe("canary gate matrix (#24)", () => {
+  it("records Claude Code 2.1.233 as observed without promoting the supported baseline", () => {
+    expect(CLAUDE_CODE_OBSERVED_VERSION).toBe("2.1.233");
+    expect(CLAUDE_CODE_CONTRACT.baseline).toBe("claude-code-2.1.229");
+    expect(CLAUDE_CODE_CONTRACT.baseline).not.toContain(CLAUDE_CODE_OBSERVED_VERSION);
+  });
+
   it("covers every documented capability gate for an exact access path", () => {
     const results = runGateMatrix(inputFor("codex", "gpt-5.4"));
     expect(results.map((result) => result.gate).sort()).toEqual([...CANARY_GATES].sort());

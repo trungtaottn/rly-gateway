@@ -14,7 +14,7 @@ import { UpdateStateStore } from "../../src/runtime/update/store.js";
 import { UPDATE_LOCK_FILE_NAME, type CandidateInstaller, type CandidateManifest } from "../../src/runtime/update/types.js";
 import { RUNTIME_VERSION } from "../../src/runtime/gateway-attestation.js";
 import type { ServiceManagerAdapter, ServiceStatus } from "../../src/service-manager/types.js";
-import { SCHEMA_V2_VERSION } from "../../src/storage/schema-v2.js";
+import { SCHEMA_V4_VERSION } from "../../src/storage/schema-v4.js";
 import { writePrivateTextAtomically } from "../../src/storage/private-files.js";
 
 const directories: string[] = [];
@@ -244,7 +244,7 @@ describe("safe zero-downtime runtime update lifecycle (#73)", () => {
     expect(await harness.versionOf()).toBe(RUNTIME_VERSION);
 
     const installer = new FakeInstaller();
-    installer.manifest = { product: "rly-gateway", version: "2.0.0", stateVersion: 2, migrationForwardOnly: false };
+    installer.manifest = { product: "rly-gateway", version: "2.0.0", stateVersion: 4, migrationForwardOnly: false };
     const versionToStart = "2.0.0";
     const manager = new FakeServiceManager(async () => { await harness.restartTo(versionToStart); });
     const store = new UpdateStateStore(controlPlaneDir);
@@ -264,7 +264,7 @@ describe("safe zero-downtime runtime update lifecycle (#73)", () => {
       candidate: { version: "2.0.0", sourceDirectory: "/fake/candidate" },
       updateStore: store,
       cliRuntimeVersion: RUNTIME_VERSION,
-      cliStateVersion: SCHEMA_V2_VERSION,
+      cliStateVersion: SCHEMA_V4_VERSION,
     });
 
     expect(result.outcome).toBe("activated");
@@ -291,7 +291,7 @@ describe("safe zero-downtime runtime update lifecycle (#73)", () => {
     const session = await issueLaunchSession(port, managementPort, controlPlaneDir, runtimeDir);
 
     const installer = new FakeInstaller();
-    installer.manifest = { product: "rly-gateway", version: "2.0.0", stateVersion: 2, migrationForwardOnly: false };
+    installer.manifest = { product: "rly-gateway", version: "2.0.0", stateVersion: 4, migrationForwardOnly: false };
     const versionToStart = "2.0.0";
     const manager = new FakeServiceManager(async () => { await harness.restartTo(versionToStart); });
     const store = new UpdateStateStore(controlPlaneDir);
@@ -314,7 +314,7 @@ describe("safe zero-downtime runtime update lifecycle (#73)", () => {
       drainTimeoutMs: 300,
       drainPollMs: 50,
       cliRuntimeVersion: RUNTIME_VERSION,
-      cliStateVersion: SCHEMA_V2_VERSION,
+      cliStateVersion: SCHEMA_V4_VERSION,
     });
     expect(pending.outcome).toBe("pending");
     expect(pending.state).toBe("pending-activation");
@@ -341,7 +341,7 @@ describe("safe zero-downtime runtime update lifecycle (#73)", () => {
       },
       updateStore: store,
       cliRuntimeVersion: RUNTIME_VERSION,
-      cliStateVersion: SCHEMA_V2_VERSION,
+      cliStateVersion: SCHEMA_V4_VERSION,
     });
     expect(activated.outcome).toBe("activated");
     expect(activated.state).toBe("active");
@@ -363,7 +363,7 @@ describe("safe zero-downtime runtime update lifecycle (#73)", () => {
       issueLaunchSession(port, managementPort, controlPlaneDir, runtimeDir),
     ]);
     const installer = new FakeInstaller();
-    installer.manifest = { product: "rly-gateway", version: "2.0.0", stateVersion: 2, migrationForwardOnly: false };
+    installer.manifest = { product: "rly-gateway", version: "2.0.0", stateVersion: 4, migrationForwardOnly: false };
     const manager = new FakeServiceManager(async () => { await harness.restartTo("2.0.0"); });
     const store = new UpdateStateStore(controlPlaneDir);
     const pending = await runUpdate({
@@ -377,7 +377,7 @@ describe("safe zero-downtime runtime update lifecycle (#73)", () => {
       drainTimeoutMs: 200,
       drainPollMs: 50,
       cliRuntimeVersion: RUNTIME_VERSION,
-      cliStateVersion: SCHEMA_V2_VERSION,
+      cliStateVersion: SCHEMA_V4_VERSION,
     });
     expect(pending.outcome).toBe("pending");
     expect(manager.restarts).toBe(0);
@@ -393,7 +393,7 @@ describe("safe zero-downtime runtime update lifecycle (#73)", () => {
       drainTimeoutMs: 200,
       drainPollMs: 50,
       cliRuntimeVersion: RUNTIME_VERSION,
-      cliStateVersion: SCHEMA_V2_VERSION,
+      cliStateVersion: SCHEMA_V4_VERSION,
     });
     expect(stillPending.outcome).toBe("pending");
     await second.release();
@@ -405,7 +405,7 @@ describe("safe zero-downtime runtime update lifecycle (#73)", () => {
       serviceManager: manager,
       updateStore: store,
       cliRuntimeVersion: RUNTIME_VERSION,
-      cliStateVersion: SCHEMA_V2_VERSION,
+      cliStateVersion: SCHEMA_V4_VERSION,
     });
     expect(activated.outcome).toBe("activated");
     expect(await harness.versionOf()).toBe("2.0.0");
@@ -422,7 +422,7 @@ describe("safe zero-downtime runtime update lifecycle (#73)", () => {
     const session = await issueLaunchSession(port, managementPort, controlPlaneDir, runtimeDir);
 
     const installer = new FakeInstaller();
-    installer.manifest = { product: "rly-gateway", version: "0.2.0", stateVersion: 2, migrationForwardOnly: false };
+    installer.manifest = { product: "rly-gateway", version: "0.2.0", stateVersion: 4, migrationForwardOnly: false };
     const store = new UpdateStateStore(controlPlaneDir);
     // Compatible candidate (same major as the serving 0.1.0) is pending.
     await store.write({
@@ -499,7 +499,7 @@ describe("safe zero-downtime runtime update lifecycle (#73)", () => {
     const harness = await startHarness(port, managementPort, runtimeDir, controlPlaneDir);
 
     const installer = new FakeInstaller();
-    installer.manifest = { product: "rly-gateway", version: "2.0.0", stateVersion: 2, migrationForwardOnly: false };
+    installer.manifest = { product: "rly-gateway", version: "2.0.0", stateVersion: 4, migrationForwardOnly: false };
     // The candidate restarts but keeps reporting the OLD version (broken).
     const versionToStart = RUNTIME_VERSION;
     const manager = new FakeServiceManager(async () => { await harness.restartTo(versionToStart); });
@@ -514,7 +514,7 @@ describe("safe zero-downtime runtime update lifecycle (#73)", () => {
       candidate: { version: "2.0.0", sourceDirectory: "/fake/candidate" },
       updateStore: store,
       cliRuntimeVersion: RUNTIME_VERSION,
-      cliStateVersion: SCHEMA_V2_VERSION,
+      cliStateVersion: SCHEMA_V4_VERSION,
     });
 
     // One bounded rollback: activation restart + rollback restart.
@@ -539,7 +539,7 @@ describe("safe zero-downtime runtime update lifecycle (#73)", () => {
     const harness = await startHarness(port, managementPort, runtimeDir, controlPlaneDir);
 
     const installer = new FakeInstaller();
-    installer.manifest = { product: "rly-gateway", version: "2.0.0", stateVersion: 2, migrationForwardOnly: false };
+    installer.manifest = { product: "rly-gateway", version: "2.0.0", stateVersion: 4, migrationForwardOnly: false };
     // The service-manager restart lands on a port now owned by a foreign
     // process; RLY must fail closed and never signal the listener.
     const manager = new FakeServiceManager(async () => {
@@ -565,7 +565,7 @@ describe("safe zero-downtime runtime update lifecycle (#73)", () => {
       candidate: { version: "2.0.0", sourceDirectory: "/fake/candidate" },
       updateStore: store,
       cliRuntimeVersion: RUNTIME_VERSION,
-      cliStateVersion: SCHEMA_V2_VERSION,
+      cliStateVersion: SCHEMA_V4_VERSION,
     });
     expect(result.outcome).toBe("failed");
     // #93: rollback failure terminates in the explicit recovery-required state.
@@ -602,7 +602,7 @@ describe("safe zero-downtime runtime update lifecycle (#73)", () => {
       candidate: { version: "3.0.0", sourceDirectory: "/fake/candidate" },
       updateStore: store,
       cliRuntimeVersion: RUNTIME_VERSION,
-      cliStateVersion: SCHEMA_V2_VERSION,
+      cliStateVersion: SCHEMA_V4_VERSION,
     });
     expect(result.outcome).toBe("failed");
     expect(result.message).toContain("forward-only");
@@ -623,7 +623,7 @@ describe("safe zero-downtime runtime update lifecycle (#73)", () => {
     await seedControlPlane(controlPlaneDir);
     const harness = await startHarness(port, managementPort, runtimeDir, controlPlaneDir);
     const installer = new FakeInstaller();
-    installer.manifest = { product: "rly-gateway", version: "2.0.0", stateVersion: 2, migrationForwardOnly: false };
+    installer.manifest = { product: "rly-gateway", version: "2.0.0", stateVersion: 4, migrationForwardOnly: false };
     const manager = new FakeServiceManager(async () => { await harness.restartTo("2.0.0"); });
     const store = new UpdateStateStore(controlPlaneDir);
     const deps = {
@@ -635,7 +635,7 @@ describe("safe zero-downtime runtime update lifecycle (#73)", () => {
       candidate: { version: "2.0.0", sourceDirectory: "/fake/candidate" },
       updateStore: store,
       cliRuntimeVersion: RUNTIME_VERSION,
-      cliStateVersion: SCHEMA_V2_VERSION,
+      cliStateVersion: SCHEMA_V4_VERSION,
     };
     const [first, second] = await Promise.allSettled([runUpdate(deps), runUpdate(deps)]);
     const results = [first, second];
@@ -663,7 +663,7 @@ describe("safe zero-downtime runtime update lifecycle (#73)", () => {
     const installer = new FakeInstaller();
     installer.verifyOk = true;
     installer.installs.push("2.0.0");
-    installer.manifest = { product: "rly-gateway", version: "2.0.0", stateVersion: 2, migrationForwardOnly: false };
+    installer.manifest = { product: "rly-gateway", version: "2.0.0", stateVersion: 4, migrationForwardOnly: false };
     const manager = new FakeServiceManager(async () => { await harness.restartTo("2.0.0"); });
     const store = new UpdateStateStore(controlPlaneDir, () => undefined);
     // Crash artifacts: pending-activation record + stale lock owned by a dead process.
@@ -688,7 +688,7 @@ describe("safe zero-downtime runtime update lifecycle (#73)", () => {
       serviceManager: manager,
       updateStore: store,
       cliRuntimeVersion: RUNTIME_VERSION,
-      cliStateVersion: SCHEMA_V2_VERSION,
+      cliStateVersion: SCHEMA_V4_VERSION,
     });
     expect(result.outcome).toBe("activated");
     expect(await harness.versionOf()).toBe("2.0.0");
@@ -713,7 +713,7 @@ describe("safe zero-downtime runtime update lifecycle (#73)", () => {
       proof?: string;
     };
     expect(identity.runtimeVersion).toBe(RUNTIME_VERSION);
-    expect(identity.stateVersion).toBe(SCHEMA_V2_VERSION);
+    expect(identity.stateVersion).toBe(SCHEMA_V4_VERSION);
     expect(identity.activeSessions).toBe(0);
     expect(identity.draining).toBe(false);
     expect(identity.update?.state).toBe("idle");

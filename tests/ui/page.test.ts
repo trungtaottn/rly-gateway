@@ -17,6 +17,9 @@ describe("management UI page", () => {
     expect(html).toContain("Health / quota");
     expect(html).toContain("Audit");
     expect(html).toContain("Route traces");
+    expect(html).toContain("Direct env account");
+    expect(html).toContain("Credential env name");
+    expect(html).toContain("Stores the variable name only");
     expect(html).toContain('for="view-select"');
     expect(html).toContain("Skip to main content");
     expect(html).toContain("aria-live");
@@ -33,5 +36,18 @@ describe("management UI page", () => {
     expect(html).toContain("#main:focus-visible");
     expect(html).toContain("min-height:var(--target)");
     expect(html).toContain("@media (min-width:1024px)");
+  });
+
+  it("shows provider/model identity columns on profiles and traces tables", () => {
+    const html = bootstrapPageHtml();
+    expect(html).toContain('["Name","Harness","Provider","Pool","Primary","Fast","Reasoning","Version",""]');
+    expect(html).toContain('["When","Request","Profile","Reason","Requested","Resolved","Provider","Adapter","Selected","Candidates"]');
+    expect(html).toContain("item.intent.sourceSelector");
+    expect(html).toContain("item.effectiveModelDecision.target");
+    expect(html).toContain("target.physicalModelId");
+    expect(html).toContain("target.accessProviderId");
+    expect(html).toContain("target.adapterId");
+    expect(html).not.toContain('["Name","Harness","Pool","Version",""]');
+    expect(html).not.toContain('["When","Request","Profile","Strategy","Reason","Selected","Candidates"]');
   });
 });

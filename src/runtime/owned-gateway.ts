@@ -26,7 +26,7 @@ import type { AcquireGatewayOptions, GatewayLeaseHandle } from "./gateway-lifecy
 import { LeaseManager } from "./lease-manager.js";
 import type { ProcessIdentity } from "./ownership-record.js";
 import type { RuntimeStore } from "./runtime-store.js";
-import { SCHEMA_V2_VERSION } from "../storage/schema-v2.js";
+import { SCHEMA_V4_VERSION } from "../storage/schema-v4.js";
 
 const LEASE_TTL_MS = 15_000;
 const IDLE_GRACE_MS = 2_000;
@@ -89,15 +89,10 @@ export async function startOwnedGateway(input: Readonly<{
     try {
       if (input.stillIdle !== undefined && !input.stillIdle()) return;
       sessions.revokeAll();
-      const managementShutdown = appHolder.management
-        ? await closeGatewayBounded(appHolder.management)
-        : { forced: false };
-      const gatewayShutdown = appHolder.app
-        ? await closeGatewayBounded(appHolder.app)
-        : { forced: false };
+      await (appHolder.management ? closeGatewayBounded(appHolder.management) : Promise.resolve({ forced: false }));
+      await (appHolder.app ? closeGatewayBounded(appHolder.app) : Promise.resolve({ forced: false }));
       await appHolder.broker?.close();
       appHolder.controlPlane?.close();
-      if (gatewayShutdown.forced || managementShutdown.forced) return;
       await store.removeInstanceArtifacts(instanceId);
       leases.dispose();
     } finally {
@@ -199,7 +194,7 @@ export async function startOwnedGateway(input: Readonly<{
       launchSessions,
       traces,
       shutdown,
-      stateVersion: SCHEMA_V2_VERSION,
+      stateVersion: SCHEMA_V4_VERSION,
       buildIdentity,
       updateState: () => updateStore.read().catch(() => undefined),
       compatibility,

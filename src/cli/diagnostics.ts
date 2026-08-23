@@ -537,10 +537,23 @@ function projectRouteTraces(value: unknown): readonly Record<string, unknown>[] 
     const selected = record["selected"];
     const selectedRecord = selected !== null && typeof selected === "object" ? selected as Record<string, unknown> : undefined;
     const decision = record["effectiveModelDecision"];
+    const modelSelection = record["modelSelection"];
+    const selectionRecord = modelSelection !== null && typeof modelSelection === "object"
+      ? modelSelection as Record<string, unknown>
+      : undefined;
     return [{
       profileName: record["profileName"],
       sourceRule: record["sourceRule"],
       selectedPseudonym: selectedRecord?.["accountPseudonym"],
+      ...(selectionRecord === undefined
+        ? {}
+        : {
+            modelSelection: {
+              source: selectionRecord["source"],
+              selectedLogicalId: selectionRecord["selectedLogicalId"],
+              reason: selectionRecord["reason"],
+            },
+          }),
       // #127: secret-free model-control explanation (selector, precedence,
       // target, compatibility, reasoning, pool, revisions, blocked
       // alternatives). Never prompts/credentials/account identity.

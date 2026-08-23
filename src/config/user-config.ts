@@ -2,7 +2,7 @@ import { constants } from "node:fs";
 import { access } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
-import { readInstallation } from "../storage/installation.js";
+import { readInstallation, readInstallationPointer } from "../storage/installation.js";
 import { RLY_STATE_DIRECTORY_NAME } from "../storage/paths.js";
 import { loadConfig } from "./load-config.js";
 import { gatewayConfigSchema, type GatewayConfig } from "./schema.js";
@@ -37,9 +37,8 @@ function defaultUserConfig(): GatewayConfig {
 /**
  * Resolves the configuration for the user-facing control plane. The normal
  * installed path is the durable `~/.rly/installation.json` record written by
- * `rly init`, so `rly config` works from any working directory without a local
- * `gateway.config.toml`. Explicit `--config` and the CWD file remain explicit
- * dev/operator paths only; they are never the required normal-user route.
+ * `rly init` (a full record, or a pointer to a custom dataDirectory). Explicit
+ * `--config` and the CWD file remain explicit dev/operator paths only.
  */
 export async function resolveUserConfig(options: Readonly<{
   home?: string;
@@ -52,7 +51,11 @@ export async function resolveUserConfig(options: Readonly<{
     const path = resolve(options.explicit);
     return { config: await loadConfig(path), configPath: path, source: "explicit", initialized: false, home };
   }
+  const pointer = await readInstallationPointer(home);
   const installation = await readInstallation(join(home, RLY_STATE_DIRECTORY_NAME));
+  if (pointer !== undefined && installation === undefined) {
+    throw new Error("RLY installation pointer at ~/.rly refers to a missing data directory; restore the control plane or re-run `rly init`");
+  }
   if (installation !== undefined) {
     const recorded = installation.configPath;
     if (await isReadableFile(recorded)) {

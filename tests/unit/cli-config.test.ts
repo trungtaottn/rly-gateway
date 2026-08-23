@@ -13,7 +13,7 @@ import { RUNTIME_VERSION } from "../../src/runtime/gateway-attestation.js";
 import type { RuntimeInspection } from "../../src/runtime/gateway-lifecycle.js";
 import type { ResidentRuntimeHandle } from "../../src/runtime/resident-runtime.js";
 import type { ServiceManagerAdapter } from "../../src/service-manager/types.js";
-import { writeInstallation } from "../../src/storage/installation.js";
+import { persistUserInstallation, writeInstallation } from "../../src/storage/installation.js";
 import type { ManagementResult } from "../../src/cli/management-client.js";
 
 const directories: string[] = [];
@@ -58,7 +58,10 @@ function readyInspection(): RuntimeInspection {
   };
 }
 
-function foregroundHandle(alreadyRunning: boolean): ResidentRuntimeHandle {
+function foregroundHandle(
+  alreadyRunning: boolean,
+  overrides: Partial<Pick<ResidentRuntimeHandle, "shutdown" | "stopped">> = {},
+): ResidentRuntimeHandle {
   return {
     baseUrl: "http://127.0.0.1:17871",
     instanceId: "00000000-0000-4000-8000-000000000066",
@@ -66,6 +69,7 @@ function foregroundHandle(alreadyRunning: boolean): ResidentRuntimeHandle {
     alreadyRunning,
     shutdown: () => Promise.resolve(),
     stopped: Promise.resolve(),
+    ...overrides,
   };
 }
 
@@ -125,6 +129,9 @@ describe("rly config parsing", () => {
       focus: { kind: "providers", action: "create", fields: { name: "codex", mode: "oauth" } },
     });
     expect(parseConfigArgs(["config", "providers"], "/work")).toMatchObject({ focus: { kind: "providers", action: "list" } });
+    expect(parseConfigArgs(["config", "accounts", "create", "--provider-id", "p-1", "--pseudonym", "acct-1", "--credential-env", "OPENROUTER_API_KEY"], "/work")).toMatchObject({
+      focus: { kind: "accounts", action: "create", fields: { "provider-id": "p-1", pseudonym: "acct-1", "credential-env": "OPENROUTER_API_KEY" } },
+    });
     expect(parseConfigArgs(["config", "accounts", "login", "--provider-id", "p-1", "--pseudonym", "acct-1"], "/work")).toMatchObject({
       focus: { kind: "accounts", action: "login", fields: { "provider-id": "p-1", pseudonym: "acct-1" } },
     });
@@ -140,7 +147,7 @@ describe("rly config parsing", () => {
   });
 
   it("rejects unknown resources and invalid actions", () => {
-    expect(() => parseConfigArgs(["config", "bogus"], "/work")).toThrow("config requires status, ui, providers, accounts, pools, or profiles");
+    expect(() => parseConfigArgs(["config", "bogus"], "/work")).toThrow("config requires status, ui, providers, accounts, pools, profiles, or keys");
     expect(() => parseConfigArgs(["config", "accounts", "bogus"], "/work")).toThrow("config accounts action is not valid");
     expect(() => parseConfigArgs(["config", "providers", "bogus"], "/work")).toThrow("config providers action is not valid");
     expect(() => parseConfigArgs(["config", "--config"], "/work")).toThrow("--config requires a path");
@@ -178,6 +185,26 @@ describe("rly config durable configuration resolution", () => {
     const resolved = await resolveUserConfig({ home, cwd: "/somewhere/else" });
     expect(resolved.source).toBe("installation");
     expect(resolved.configPath).toBe(recorded);
+    expect(resolved.initialized).toBe(true);
+  });
+
+  it("follows a ~/.rly pointer to a custom dataDirectory installation", async () => {
+    const home = await directory();
+    const custom = await directory();
+    const recorded = join(home, "durable-config.toml");
+    await writeFile(recorded, "schemaVersion = 1\n[gateway]\nport = 17871\n[controlPlane]\n" + `dataDirectory = ${JSON.stringify(custom)}\n`, "utf8");
+    await persistUserInstallation(home, custom, {
+      schemaVersion: 1,
+      version: RUNTIME_VERSION,
+      configPath: recorded,
+      platform: "linux",
+      serviceName: "rly-gateway",
+      registeredAt: new Date().toISOString(),
+    });
+    const resolved = await resolveUserConfig({ home, cwd: "/somewhere/else" });
+    expect(resolved.source).toBe("installation");
+    expect(resolved.configPath).toBe(recorded);
+    expect(resolved.config.controlPlane.dataDirectory).toBe(custom);
     expect(resolved.initialized).toBe(true);
   });
 
@@ -330,9 +357,16 @@ describe("rly config runtime recovery and headless behavior", () => {
   it("starts a session-scoped foreground runtime when no service is initialized", async () => {
     const output = vi.fn();
     vi.spyOn(console, "log").mockImplementation(output);
-    const start = vi.fn().mockResolvedValue(foregroundHandle(false));
+    const ports = { gateway: true, management: true };
+    const shutdown = vi.fn(() => {
+      ports.gateway = false;
+      ports.management = false;
+      return Promise.resolve();
+    });
+    const start = vi.fn().mockResolvedValue(foregroundHandle(false, { shutdown }));
     const command = parseConfigArgs(["config", "status"], "/work");
     if (!command) throw new Error("expected config command");
+    const startedAt = Date.now();
     const code = await runConfig(command, deps({
       inspectRuntime: () => Promise.resolve({ state: "not-running" }),
       readInstallation: () => Promise.resolve(undefined),
@@ -340,8 +374,71 @@ describe("rly config runtime recovery and headless behavior", () => {
     }));
     expect(code).toBe(0);
     expect(start).toHaveBeenCalledOnce();
+    expect(shutdown).toHaveBeenCalledOnce();
+    expect(ports).toEqual({ gateway: false, management: false });
+    expect(Date.now() - startedAt).toBeLessThan(500);
     const payload = JSON.parse(String(output.mock.calls[0]?.[0])) as { foreground?: { sessionScoped: boolean } };
     expect(payload.foreground?.sessionScoped).toBe(true);
+  });
+
+  it("shuts down session-scoped foreground after one-shot focused commands", async () => {
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const shutdown = vi.fn(() => Promise.resolve());
+    const command = parseConfigArgs(["config", "providers", "list"], "/work");
+    if (!command) throw new Error("expected config command");
+    const code = await runConfig(command, deps({
+      inspectRuntime: () => Promise.resolve({ state: "not-running" }),
+      readInstallation: () => Promise.resolve(undefined),
+      startResidentRuntime: () => Promise.resolve(foregroundHandle(false, { shutdown })),
+      managementRequest: vi.fn(() => Promise.resolve({ ok: true, status: 200, body: { items: [] } })),
+    }));
+    expect(code).toBe(0);
+    expect(shutdown).toHaveBeenCalledOnce();
+  });
+
+  it("shuts down session-scoped foreground when the management token is missing", async () => {
+    const output = vi.fn();
+    vi.spyOn(console, "log").mockImplementation(output);
+    const shutdown = vi.fn(() => Promise.resolve());
+    const command = parseConfigArgs(["config", "status"], "/work");
+    if (!command) throw new Error("expected config command");
+    const code = await runConfig(command, deps({
+      inspectRuntime: () => Promise.resolve({ state: "not-running" }),
+      readInstallation: () => Promise.resolve(undefined),
+      startResidentRuntime: () => Promise.resolve(foregroundHandle(false, { shutdown })),
+      readManagementToken: () => Promise.resolve(undefined),
+    }));
+    expect(code).toBe(1);
+    expect(shutdown).toHaveBeenCalledOnce();
+    expect(String(output.mock.calls[0]?.[0])).toContain("management is not running");
+  });
+
+  it("keeps the session-scoped foreground alive for the interactive control-center", async () => {
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+    let resolveStopped!: () => void;
+    const stopped = new Promise<void>((resolve) => { resolveStopped = resolve; });
+    const shutdown = vi.fn(() => Promise.resolve());
+    let opened!: () => void;
+    const openedPromise = new Promise<void>((resolve) => { opened = resolve; });
+    const openBrowser = vi.fn(() => { opened(); });
+    const command = parseConfigArgs(["config"], "/work");
+    if (!command) throw new Error("expected config command");
+    const done = runConfig(command, deps({
+      inspectRuntime: () => Promise.resolve({ state: "not-running" }),
+      readInstallation: () => Promise.resolve(undefined),
+      startResidentRuntime: () => Promise.resolve(foregroundHandle(false, { shutdown, stopped })),
+      managementRequest: vi.fn(() => Promise.resolve({
+        ok: true,
+        status: 200,
+        body: { token: "bootstrap-token-fixture", expiresAt: "2026-08-14T00:00:00.000Z" },
+      })),
+      openBrowser,
+    }));
+    await openedPromise;
+    expect(shutdown).not.toHaveBeenCalled();
+    resolveStopped();
+    await expect(done).resolves.toBe(0);
+    expect(shutdown).not.toHaveBeenCalled();
   });
 
   it("reuses an already-running resident runtime without touching the service", async () => {
@@ -380,6 +477,12 @@ describe("rly config runtime recovery and headless behavior", () => {
     const printed = output.mock.calls.map((call) => String(call[0])).join("\n");
     expect(printed).toContain('"url":"http://127.0.0.1:17872/#t=bootstrap-token-fixture"');
     expect(printed).toContain('"headless":true');
+  });
+
+  it("requires credential-env for accounts create", async () => {
+    const command = parseConfigArgs(["config", "accounts", "create", "--provider-id", "p-1", "--pseudonym", "acct-1"], "/work");
+    if (!command) throw new Error("expected config command");
+    await expect(runConfig(command, deps())).rejects.toThrow("accounts create requires --provider-id, --pseudonym, and --credential-env");
   });
 
   it("propagates stale-version mutations explicitly and exits non-zero", async () => {

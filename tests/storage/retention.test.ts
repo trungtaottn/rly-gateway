@@ -71,9 +71,10 @@ describe("retention policy", () => {
         continuation: { owner: "responses", maxAgeMs: 1 },
         backups: { owner: "storage", maxAgeMs: 1 },
         expiredCredentials: { owner: "credential-broker", maxAgeMs: 0 },
+        ledger: { owner: "ledger", maxAgeMs: 1 },
       },
     });
-    expect(result.applied.map((item) => item.className)).toEqual(["logs", "audit", "continuation", "backups", "expiredCredentials"]);
+    expect(result.applied.map((item) => item.className)).toEqual(["logs", "audit", "continuation", "backups", "expiredCredentials", "ledger"]);
     expect(await continuation.get("resp_old")).toBeUndefined();
     await expect(credentials.metadata("cred-expired01")).resolves.toMatchObject({ handle: "cred-expired01" });
   });

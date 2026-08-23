@@ -138,7 +138,7 @@ async function openGateway(
     instanceId: "00000000-0000-4000-8000-000000000401",
     configFingerprint: "c".repeat(64),
     config,
-    environment: { DEEPSEEK_API_KEY: "fixture-key" },
+    environment: { DEEPSEEK_API_KEY: "fixture-key", OPENROUTER_API_KEY: "fixture-key" },
     controlPlane: store,
     broker,
     selector: new RouteSelector(store, new AffinityStore(directory)),
@@ -171,7 +171,14 @@ async function startUpstreams(): Promise<{ endpoints: { codex: string; cline: st
   return { endpoints, received };
 }
 
-type ModelRow = { type?: unknown; id?: unknown; display_name?: unknown; created_at?: unknown };
+type ModelRow = {
+  type?: unknown;
+  id?: unknown;
+  display_name?: unknown;
+  created_at?: unknown;
+  max_input_tokens?: unknown;
+  max_tokens?: unknown;
+};
 
 function modelsOf(payload: unknown): ModelRow[] {
   if (payload === null || typeof payload !== "object") return [];
@@ -409,6 +416,54 @@ describe("gateway model discovery and projection routing (#72)", () => {
     });
     const optInRows = (await discover("instance-secret")).rows;
     expect(optInRows.map((row) => row.display_name)).toContain("DeepSeek V4 Flash (DeepSeek)");
+  });
+
+  it("emits Anthropic-shaped token limits only when the projection has evidenced numbers", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "rly-gateway-models-limits-"));
+    directories.push(directory);
+    const { endpoints } = await startUpstreams();
+    const seeded = await openGateway(directory, {
+      endpoints,
+      registry: directProviderRegistry,
+      config: gatewayConfigSchema.parse({
+        schemaVersion: 1,
+        gateway: { port: 17891, logLevel: "silent", modelDiscovery: { experimentalModels: true } },
+      }),
+    });
+    const openrouterServer = Fastify();
+    upstreams.push(openrouterServer);
+    openrouterServer.post("/chat/completions", () => new Response(sseFixture("or", "OPENROUTER_OK"), { headers: { "content-type": "text/event-stream" } }));
+    const openrouterEndpoint = await openrouterServer.listen({ host: "127.0.0.1", port: 0 });
+    const openrouter = seeded.store.createProvider({ name: "openrouter", integrationMode: "direct", endpointPolicy: openrouterEndpoint }, "cli");
+    const openrouterAccount = seeded.store.createAccount({
+      pseudonym: "acct-or-a",
+      providerId: openrouter.id,
+      credentialHandle: "env:OPENROUTER_API_KEY",
+    }, "cli");
+    seeded.store.bindCredential(openrouterAccount.id, openrouterAccount.version, {
+      credentialHandle: "env:OPENROUTER_API_KEY",
+      credentialGeneration: 1,
+      state: "ready",
+    }, "cli");
+    seeded.store.createPool({
+      name: "or-pool",
+      providerId: openrouter.id,
+      strategy: "fill-first",
+      retryBudget: 1,
+      accountIds: [openrouterAccount.id],
+    }, "cli");
+    const { rows } = await discover("instance-secret");
+    const limited = rows.find((row) => row.display_name === "DeepSeek V4 Flash 0731 (OpenRouter)");
+    expect(limited?.max_input_tokens).toBe(1_310_720);
+    expect(limited?.max_tokens).toBe(393_216);
+    const unlimited = rows.find((row) => row.display_name === "NVIDIA Nemotron 3.5 Lightning (Free) (OpenRouter)");
+    expect(unlimited).toBeDefined();
+    expect(unlimited).not.toHaveProperty("max_input_tokens");
+    expect(unlimited).not.toHaveProperty("max_tokens");
+    const deepseekFlash = rows.find((row) => row.display_name === "DeepSeek V4 Flash (DeepSeek)");
+    expect(deepseekFlash).toBeDefined();
+    expect(deepseekFlash).not.toHaveProperty("max_input_tokens");
+    expect(deepseekFlash).not.toHaveProperty("max_tokens");
   });
 
   it("#J1 UX: an empty discovery carries a secret-free note explaining why, never a bare empty list", async () => {

@@ -5,7 +5,7 @@ import type { TierResolutionFailure } from "../routing/model-tiers/errors.js";
 export class ProfileActivationError extends Error {
   override name = "ProfileActivationError";
   public constructor(
-    readonly code: "profile-not-found" | "profile-not-claude" | "profile-has-no-pool" | "role-unmapped" | "capability-rejected" | "invalid-launch-policy" | "tier-unavailable" | "model-unavailable",
+    readonly code: "profile-not-found" | "profile-not-claude" | "profile-has-no-pool" | "role-unmapped" | "capability-rejected" | "invalid-launch-policy" | "tier-unavailable" | "model-unavailable" | "context_window_exceeded",
     message = "Profile cannot be activated",
     /**
      * Typed model-selection failure reason (#68) when the activation failed at

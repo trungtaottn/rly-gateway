@@ -1,12 +1,13 @@
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
-import { readInstallation } from "../storage/installation.js";
+import { INSTALLATION_FILE_NAME, readInstallation, resolveControlPlaneDirectory } from "../storage/installation.js";
 import { RLY_STATE_DIRECTORY_NAME, LOG_DIRECTORY, SERVICE_LOG_NAME } from "../storage/paths.js";
 import { createServiceManager } from "../service-manager/index.js";
 import { bootstrapDirectory } from "../runtime/bootstrap.js";
 import { UPDATE_STATE_FILE_NAME, UPDATE_LOCK_FILE_NAME } from "../runtime/update/types.js";
 import { INSTALLER_STATE_DIRECTORY } from "../installer/state.js";
 import { readPrivateSymlinkTarget, removePrivateSymlinkIfPresent } from "../storage/private-files.js";
+import { probeUserLauncherSymlink } from "./install.js";
 
 /**
  * `rly uninstall` (#129) — removes ONLY RLY-owned service registration and
@@ -134,7 +135,7 @@ export async function runUninstallCommand(
   dependencies: UninstallCommandDependencies = {},
 ): Promise<number> {
   const home = options.home ?? homedir();
-  const controlPlaneDirectory = join(home, RLY_STATE_DIRECTORY_NAME);
+  const controlPlaneDirectory = await resolveControlPlaneDirectory(home);
   const installation = await readInstallation(controlPlaneDirectory);
 
   if (options.purge) {
@@ -152,6 +153,10 @@ export async function runUninstallCommand(
     await removeUserLauncherSymlink({ home, controlPlaneDirectory });
     const { rm } = await import("node:fs/promises");
     await rm(controlPlaneDirectory, { recursive: true, force: true });
+    const defaultDir = join(home, RLY_STATE_DIRECTORY_NAME);
+    if (resolve(controlPlaneDirectory) !== resolve(defaultDir)) {
+      await rm(join(defaultDir, INSTALLATION_FILE_NAME), { force: true });
+    }
     console.log(JSON.stringify({
       ok: true,
       purged: true,
@@ -166,15 +171,16 @@ export async function runUninstallCommand(
     return 1;
   }
 
-  const service = await unregisterService({ home, controlPlaneDirectory }, dependencies);
-  const launcher = await removeUserLauncherSymlink({ home, controlPlaneDirectory });
-  if (launcher.foreign) {
+  const launcherProbe = await probeUserLauncherSymlink({ home, controlPlaneDirectory });
+  if (launcherProbe.foreign) {
     console.log(JSON.stringify({
       ok: false,
       error: "~/.local/bin/rly is not RLY-owned; refusing to remove a foreign path. Inspect it before continuing",
     }));
     return 1;
   }
+  const service = await unregisterService({ home, controlPlaneDirectory }, dependencies);
+  await removeUserLauncherSymlink({ home, controlPlaneDirectory });
   const { rm } = await import("node:fs/promises");
   for (const artifact of installArtifactPaths(controlPlaneDirectory)) {
     await rm(artifact.path, { recursive: true, force: true });

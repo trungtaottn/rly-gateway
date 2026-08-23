@@ -123,6 +123,16 @@ describe("profile pool route", () => {
       ? issuedBody.token
       : "";
     expect(token).not.toBe("instance-secret");
+    const planned = issuedBody && typeof issuedBody === "object" && "planned" in issuedBody
+      ? issuedBody.planned as Record<string, unknown>
+      : undefined;
+    expect(planned).toMatchObject({
+      providerName: "openrouter",
+      poolName: "work-pool",
+    });
+    expect(planned).not.toHaveProperty("effective");
+    expect(JSON.stringify(planned)).not.toContain(token);
+    expect(JSON.stringify(issuedBody)).not.toMatch(/"effective"/);
     const helper = await app.inject({
       method: "POST",
       url: "/v1/messages",
@@ -200,6 +210,26 @@ describe("profile pool route", () => {
     const tierError: { error?: { type?: string; reason?: string } } = tierUnavailable.json();
     expect(tierError.error?.type).toBe("tier-unavailable");
     expect(tierError.error?.reason).toBe("tier-unavailable");
+    const listedAfterTier = await app.inject({
+      method: "GET",
+      url: "/v1/route-traces",
+      headers: { authorization: `Bearer ${token}` },
+    });
+    const listedAfterTierBody: unknown = listedAfterTier.json();
+    const afterTier = listedAfterTierBody && typeof listedAfterTierBody === "object" && "traces" in listedAfterTierBody
+      ? listedAfterTierBody as {
+          traces: {
+            sourceRule?: string;
+            selected?: unknown;
+            modelSelection?: { reason?: string; selectedLogicalId?: string };
+          }[];
+        }
+      : { traces: [] };
+    const tierTrace = afterTier.traces.at(-1);
+    expect(tierTrace?.sourceRule).toBe("model-selection:tier-unavailable");
+    expect(tierTrace?.modelSelection?.reason).toBe("tier-unavailable");
+    expect(tierTrace?.modelSelection?.selectedLogicalId).toBe("openrouter/fable");
+    expect(tierTrace?.selected).toBeUndefined();
 
     const siblingLease = "00000000-0000-4000-8000-000000000012";
     await leases.add(siblingLease);
@@ -319,6 +349,228 @@ describe("profile pool route", () => {
     expect(await send(gatewayInstance, fresh, newModel)).toBe(200);
     expect(received.filter((model) => model === oldModel).length).toBe(2);
     expect(received.filter((model) => model === newModel).length).toBe(1);
+    leases.dispose();
+  });
+
+  it("records a secret-free unknown-exact-model trace before any upstream call", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "rly-gateway-unknown-exact-"));
+    directories.push(directory);
+    const received: string[] = [];
+    provider = Fastify();
+    provider.post("/chat/completions", (request) => {
+      const body = request.body as { model?: unknown };
+      if (typeof body.model === "string") received.push(body.model);
+      return new Response("should-not-run", { status: 500 });
+    });
+    const endpoint = await provider.listen({ host: "127.0.0.1", port: 0 });
+    const seeded = await seed(directory, endpoint);
+    if (!store || !broker) throw new Error("missing store");
+    store.updateProfile(seeded.profile.id, seeded.profile.version, {
+      modelRoles: { primary: "unreviewed-exact-model" },
+    }, "cli");
+    const leases = new LeaseManager({ ttlMs: 60_000, idleGraceMs: 60_000, onIdle: () => undefined });
+    const sessions = new LaunchSessionRegistry((id) => leases.has(id));
+    const traces = new RouteTraceRing();
+    const config = gatewayConfigSchema.parse({ schemaVersion: 1, gateway: { port: 17871, logLevel: "silent" } });
+    app = createGatewayServer({
+      host: "127.0.0.1",
+      port: 17871,
+      authToken: "instance-secret",
+      instanceId: "00000000-0000-4000-8000-000000000003",
+      configFingerprint: "a".repeat(64),
+      config,
+      environment: { OPENROUTER_API_KEY: "fixture-key" },
+      controlPlane: store,
+      broker,
+      selector: new RouteSelector(store, new AffinityStore(directory)),
+      launchSessions: sessions,
+      traces,
+      leases,
+    });
+    const leaseId = "00000000-0000-4000-8000-000000000031";
+    await leases.add(leaseId);
+    const issued = await app.inject({
+      method: "POST",
+      url: "/v1/launch-sessions",
+      headers: { authorization: "Bearer instance-secret", "content-type": "application/json" },
+      payload: { profileName: "work", leaseId },
+    });
+    expect(issued.statusCode).toBe(201);
+    const issuedBody: unknown = issued.json();
+    const token = issuedBody && typeof issuedBody === "object" && "token" in issuedBody && typeof issuedBody.token === "string"
+      ? issuedBody.token
+      : "";
+    const rejected = await app.inject({
+      method: "POST",
+      url: "/v1/messages",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      payload: { model: "primary", max_tokens: 8, messages: [{ role: "user", content: "fixture" }] },
+    });
+    expect(rejected.statusCode).toBe(400);
+    const errorBody: { error?: { type?: string; reason?: string } } = rejected.json();
+    expect(errorBody.error?.type).toBe("capability-rejected");
+    expect(errorBody.error?.reason).toBe("unknown-exact-model");
+    expect(received).toEqual([]);
+    const listed = await app.inject({
+      method: "GET",
+      url: "/v1/route-traces",
+      headers: { authorization: `Bearer ${token}` },
+    });
+    const listedBody: unknown = listed.json();
+    const body = listedBody && typeof listedBody === "object" && "traces" in listedBody
+      ? listedBody as {
+          traces: {
+            sourceRule?: string;
+            selected?: unknown;
+            modelSelection?: { reason?: string; selectedLogicalId?: string };
+          }[];
+        }
+      : { traces: [] };
+    expect(body.traces).toHaveLength(1);
+    expect(body.traces[0]?.sourceRule).toBe("model-selection:unknown-exact-model");
+    expect(body.traces[0]?.modelSelection?.reason).toBe("unknown-exact-model");
+    expect(body.traces[0]?.modelSelection?.selectedLogicalId).toBe("openrouter/unreviewed-exact-model");
+    expect(body.traces[0]?.selected).toBeUndefined();
+    expect(JSON.stringify(body)).not.toMatch(/fixture-key|sk-|authorization|prompt/i);
+    leases.dispose();
+  });
+
+  it("admits the exact OpenRouter DeepSeek V4 Flash 0731 pin", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "rly-gateway-or-deepseek-pin-"));
+    directories.push(directory);
+    const received: string[] = [];
+    provider = Fastify();
+    provider.post("/chat/completions", (request) => {
+      const body = request.body as { model?: unknown };
+      if (typeof body.model === "string") received.push(body.model);
+      return new Response('data: {"id":"pin","choices":[{"delta":{"content":"PIN_OK"}}]}\n\ndata: {"id":"pin","choices":[{"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1}}\n\ndata: [DONE]\n\n', { headers: { "content-type": "text/event-stream" } });
+    });
+    const endpoint = await provider.listen({ host: "127.0.0.1", port: 0 });
+    const seeded = await seed(directory, endpoint);
+    if (!store || !broker) throw new Error("missing store");
+    store.updateProfile(seeded.profile.id, seeded.profile.version, {
+      modelRoles: { primary: "deepseek/deepseek-v4-flash-0731" },
+    }, "cli");
+    const leases = new LeaseManager({ ttlMs: 60_000, idleGraceMs: 60_000, onIdle: () => undefined });
+    const sessions = new LaunchSessionRegistry((id) => leases.has(id));
+    const traces = new RouteTraceRing();
+    const config = gatewayConfigSchema.parse({ schemaVersion: 1, gateway: { port: 17871, logLevel: "silent" } });
+    app = createGatewayServer({
+      host: "127.0.0.1",
+      port: 17871,
+      authToken: "instance-secret",
+      instanceId: "00000000-0000-4000-8000-000000000004",
+      configFingerprint: "a".repeat(64),
+      config,
+      environment: { OPENROUTER_API_KEY: "fixture-key" },
+      controlPlane: store,
+      broker,
+      selector: new RouteSelector(store, new AffinityStore(directory)),
+      launchSessions: sessions,
+      traces,
+      leases,
+    });
+    const leaseId = "00000000-0000-4000-8000-000000000041";
+    await leases.add(leaseId);
+    const issued = await app.inject({
+      method: "POST",
+      url: "/v1/launch-sessions",
+      headers: { authorization: "Bearer instance-secret", "content-type": "application/json" },
+      payload: { profileName: "work", leaseId },
+    });
+    expect(issued.statusCode).toBe(201);
+    const issuedBody: unknown = issued.json();
+    const token = issuedBody && typeof issuedBody === "object" && "token" in issuedBody && typeof issuedBody.token === "string"
+      ? issuedBody.token
+      : "";
+    const accepted = await app.inject({
+      method: "POST",
+      url: "/v1/messages",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      payload: { model: "primary", max_tokens: 8, stream: true, messages: [{ role: "user", content: "fixture" }] },
+    });
+    expect(accepted.statusCode).toBe(200);
+    expect(accepted.body).toContain("PIN_OK");
+    expect(received).toEqual(["deepseek/deepseek-v4-flash-0731"]);
+    leases.dispose();
+  });
+
+  it("records a secret-free role-unmapped trace before any upstream call", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "rly-gateway-role-unmapped-"));
+    directories.push(directory);
+    const received: string[] = [];
+    provider = Fastify();
+    provider.post("/chat/completions", (request) => {
+      const body = request.body as { model?: unknown };
+      if (typeof body.model === "string") received.push(body.model);
+      return new Response("should-not-run", { status: 500 });
+    });
+    const endpoint = await provider.listen({ host: "127.0.0.1", port: 0 });
+    await seed(directory, endpoint);
+    if (!store || !broker) throw new Error("missing store");
+    const leases = new LeaseManager({ ttlMs: 60_000, idleGraceMs: 60_000, onIdle: () => undefined });
+    const sessions = new LaunchSessionRegistry((id) => leases.has(id));
+    const traces = new RouteTraceRing();
+    const config = gatewayConfigSchema.parse({ schemaVersion: 1, gateway: { port: 17871, logLevel: "silent" } });
+    app = createGatewayServer({
+      host: "127.0.0.1",
+      port: 17871,
+      authToken: "instance-secret",
+      instanceId: "00000000-0000-4000-8000-000000000005",
+      configFingerprint: "a".repeat(64),
+      config,
+      environment: { OPENROUTER_API_KEY: "fixture-key" },
+      controlPlane: store,
+      broker,
+      selector: new RouteSelector(store, new AffinityStore(directory)),
+      launchSessions: sessions,
+      traces,
+      leases,
+    });
+    const leaseId = "00000000-0000-4000-8000-000000000051";
+    await leases.add(leaseId);
+    const issued = await app.inject({
+      method: "POST",
+      url: "/v1/launch-sessions",
+      headers: { authorization: "Bearer instance-secret", "content-type": "application/json" },
+      payload: { profileName: "work", leaseId },
+    });
+    expect(issued.statusCode).toBe(201);
+    const issuedBody: unknown = issued.json();
+    const token = issuedBody && typeof issuedBody === "object" && "token" in issuedBody && typeof issuedBody.token === "string"
+      ? issuedBody.token
+      : "";
+    const rejected = await app.inject({
+      method: "POST",
+      url: "/v1/messages",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      payload: { model: "unmapped-client-model", max_tokens: 8, messages: [{ role: "user", content: "fixture" }] },
+    });
+    expect(rejected.statusCode).toBe(400);
+    const errorBody: { error?: { type?: string } } = rejected.json();
+    expect(errorBody.error?.type).toBe("role-unmapped");
+    expect(received).toEqual([]);
+    const listed = await app.inject({
+      method: "GET",
+      url: "/v1/route-traces",
+      headers: { authorization: `Bearer ${token}` },
+    });
+    const listedBody: unknown = listed.json();
+    const body = listedBody && typeof listedBody === "object" && "traces" in listedBody
+      ? listedBody as {
+          traces: {
+            sourceRule?: string;
+            selected?: unknown;
+            modelSelection?: { reason?: string; selectedLogicalId?: string };
+          }[];
+        }
+      : { traces: [] };
+    expect(body.traces).toHaveLength(1);
+    expect(body.traces[0]?.sourceRule).toBe("model-selection:role-unmapped");
+    expect(body.traces[0]?.modelSelection?.reason).toBe("role-unmapped");
+    expect(body.traces[0]?.modelSelection?.selectedLogicalId).toBe("openrouter/unmapped-client-model");
+    expect(body.traces[0]?.selected).toBeUndefined();
+    expect(JSON.stringify(body)).not.toMatch(/fixture-key|sk-|authorization|prompt/i);
     leases.dispose();
   });
 });

@@ -32,6 +32,7 @@ export function evaluateEligibility(input: EligibilityInput): CandidateAssessmen
   if (generation < 1) reasons.push("generation-unbound");
   if (isExpired(input.credential, input.now)) reasons.push("expired");
   if (isCooling(input.account.cooldownUntil, input.health?.cooldownUntil, input.now)) reasons.push("cooling");
+  if (input.account.quotaClass === "exhausted") reasons.push("quota-exhausted");
   if (missingCapabilities(input.capabilities, input.required).length > 0) reasons.push("capability-incompatible");
   const requiredTerms = input.provider?.requiredTermsRevision;
   if (requiredTerms !== undefined && requiredTerms !== input.account.termsAcknowledgedRevision) {

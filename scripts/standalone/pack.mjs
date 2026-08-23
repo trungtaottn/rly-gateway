@@ -74,7 +74,7 @@ export const TARGET_MATRIX = Object.freeze({
   "linux-arm64": {
     nodeDistFor: (version) => `node-v${version}-linux-arm64.tar.gz`,
     status: "experimental",
-    reason: "built deterministically on Linux CI; smoke-testing requires a provisioned Linux arm64 runner",
+    reason: "exact-byte gates run on ubuntu-24.04-arm; Stable publication stays linux-x64 until systemd user-manager qualification is accepted",
   },
 });
 
@@ -122,7 +122,6 @@ export const TOP_LEVEL_ALLOWLIST = Object.freeze([
   "node_modules/", // bundled runtime dependencies (prod install, symlinks dereferenced)
   "package.json", // runtime metadata consumed by the #94 initial deployment
   "LICENSE",
-  "THIRD_PARTY_NOTICES.md",
   "rly.json", // release-candidate manifest (#73/#93 candidate contract)
   "rly-build.json", // exact build identity (#94), same bytes as dist/rly-build.json
   "rly-artifact.json", // artifact metadata (platform, bundled node, digest, file list)
@@ -628,8 +627,8 @@ export async function tarballForTree(root, sourceDateEpoch) {
 
 /**
  * Assembles one standalone artifact directory from a prepared runtime root
- * (package.json + LICENSE + THIRD_PARTY_NOTICES.md + dist + node_modules
- * real files). Adds the bundled node, self-locating launcher, exact build
+ * (package.json + LICENSE + dist + node_modules real files). Adds the bundled
+ * node, self-locating launcher, exact build
  * identity (`rly-build.json`), candidate manifest (`rly.json`), artifact
  * metadata (`rly-artifact.json`), enforces the positive allowlist, and
  * returns the content-addressed tree digest. Pure: no network, no installs.
@@ -657,7 +656,7 @@ export async function assembleStandaloneArtifact({
   } else {
     await writeFile(
       join(artifactDir, "bin", "node.LICENSE"),
-      `Bundled Node.js ${node.version}\n\nNode.js is distributed under the MIT License (https://github.com/nodejs/node/blob/main/LICENSE).\nSee also THIRD_PARTY_NOTICES.md for the full dependency license inventory.\n`,
+      `Bundled Node.js ${node.version}\n\nNode.js is distributed under the MIT License (https://github.com/nodejs/node/blob/main/LICENSE).\n`,
     );
   }
 

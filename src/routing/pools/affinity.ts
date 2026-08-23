@@ -39,34 +39,45 @@ export function parseAffinity(value: unknown): ParsedAffinity {
 
 export class AffinityStore {
   public constructor(private readonly directory: string) {}
+  private cache: { bindings: AffinityBinding[]; at: number } | undefined;
 
   public async load(now: Date): Promise<AffinityBinding[]> {
+    const nowMs = now.getTime();
+    if (this.cache !== undefined && nowMs - this.cache.at < 1000) {
+      return this.cache.bindings.filter((item) => Date.parse(item.expiresAt) > nowMs);
+    }
     const raw = await readPrivateTextIfPresent(controlPlanePaths(this.directory).selectorAffinity);
-    if (raw === undefined) return [];
+    if (raw === undefined) {
+      this.cache = { bindings: [], at: nowMs };
+      return [];
+    }
     try {
       const parsed = JSON.parse(raw) as { sessions?: unknown };
       const sessions = Array.isArray(parsed.sessions) ? parsed.sessions : [];
-      return sessions.flatMap((item) => {
+      const bindings = sessions.flatMap((item) => {
         const binding = asBinding(item);
-        return binding !== undefined && Date.parse(binding.expiresAt) > now.getTime() ? [binding] : [];
+        return binding !== undefined && Date.parse(binding.expiresAt) > nowMs ? [binding] : [];
       });
+      this.cache = { bindings, at: nowMs };
+      return bindings;
     } catch {
+      this.cache = { bindings: [], at: nowMs };
       return [];
     }
   }
 
   public async save(bindings: readonly AffinityBinding[]): Promise<void> {
+    this.cache = { bindings: [...bindings], at: Date.now() };
     await writePrivateTextAtomically(
       controlPlanePaths(this.directory).selectorAffinity,
       JSON.stringify({ sessions: bindings }),
     );
   }
-
   public async remember(
     current: readonly AffinityBinding[],
     binding: AffinityBinding,
   ): Promise<AffinityBinding[]> {
-    const next = [...current.filter((item) => item.sessionKeyHash !== binding.sessionKeyHash), binding];
+    const next = [...current.filter((item) => item.sessionKeyHash !== binding.sessionKeyHash || item.poolId !== binding.poolId), binding];
     await this.save(next);
     return next;
   }

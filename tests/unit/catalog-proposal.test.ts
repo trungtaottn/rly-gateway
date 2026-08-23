@@ -239,6 +239,6 @@ describe("propose-only catalog drift (#23)", () => {
     }), "openrouter", directProviderRegistry);
     expect(report.new).toHaveLength(1);
     expect(directProviderRegistry.models).toBe(before);
-    expect(directProviderRegistry.models).toHaveLength(11);
+    expect(directProviderRegistry.models).toHaveLength(12);
   });
 });

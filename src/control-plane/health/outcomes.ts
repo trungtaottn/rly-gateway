@@ -24,8 +24,12 @@ export function cooldownUntilFor(
   return new Date(now.getTime() + duration * 1000).toISOString();
 }
 
-export function nextQuotaClass(outcome: RouteOutcomeClass, current: string): string {
+export function nextQuotaClass(outcome: RouteOutcomeClass, current: string, consecutiveFailures = 0): string {
   if (outcome === "success") return "healthy";
   if (outcome === "quota") return "exhausted";
+  if (outcome === "transient" && consecutiveFailures >= 3) {
+    if (current === "healthy") return "warning";
+    if (current === "warning") return "unknown";
+  }
   return current;
 }

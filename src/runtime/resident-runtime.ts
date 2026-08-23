@@ -14,6 +14,7 @@ export type ResidentRuntimeHandle = Readonly<{
   runtimeVersion: string;
   /** True when a compatible resident runtime was already running (no-op start). */
   alreadyRunning: boolean;
+  /** Closes both the gateway and management listeners owned by this process. */
   shutdown: () => Promise<void>;
   stopped: Promise<void>;
 }>;

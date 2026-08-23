@@ -86,13 +86,14 @@ describe("eligibility", () => {
     expect(compatible.route.accountPseudonym).toBe("acct-fixture-ready");
     expect(compatible.trace.candidates.filter((item) => !item.eligible).map((item) => item.accountPseudonym).sort()).toEqual([
       "acct-fixture-cooling",
+      "acct-fixture-exhausted",
       "acct-fixture-expired",
       "acct-fixture-paused",
       "acct-fixture-revoked",
       "acct-fixture-terms",
       "acct-fixture-unready",
     ]);
-    expect(compatible.trace.candidates.find((item) => item.accountPseudonym === "acct-fixture-exhausted")?.eligible).toBe(true);
+    expect(compatible.trace.candidates.find((item) => item.accountPseudonym === "acct-fixture-exhausted")?.eligible).toBe(false);
     store.close();
   });
 
@@ -198,6 +199,7 @@ describe("eligibility", () => {
       "auth-unready",
       "generation-unbound",
       "cooling",
+      "quota-exhausted",
       "capability-incompatible",
       "terms-unaccepted",
     ]);

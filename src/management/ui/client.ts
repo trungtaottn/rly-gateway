@@ -230,7 +230,14 @@ export function managementUiScript(): string {
         "<button type=\\"button\\" data-acct=\\"" + escapeHtml(item.id) + "\\" data-act=\\"refresh\\">Refresh</button>" +
         "<button type=\\"button\\" class=\\"danger\\" data-acct=\\"" + escapeHtml(item.id) + "\\" data-act=\\"revoke\\">Revoke</button>" +
         "</td></tr>";
-    }), "No accounts. Import via path or start OAuth.") +
+    }), "No accounts. Import via path, start OAuth, or bind a direct env reference.") +
+      "<form class=\\"editor\\" id=\\"env-form\\">" +
+      "<h2>Direct env account</h2>" +
+      field("e-pseudo", "Pseudonym", "required") +
+      selectField("e-provider", "Provider", optionList((cache.providers || []).filter(function (item) { return item.integrationMode === "direct"; }), "id", "name")) +
+      field("e-env", "Credential env name", "required placeholder=\\"OPENROUTER_API_KEY\\" autocomplete=\\"off\\"") +
+      "<button type=\\"submit\\" class=\\"primary\\">Create</button>" +
+      "<p class=\\"hint\\">Stores the variable name only. Never paste a secret.</p></form>" +
       "<form class=\\"editor\\" id=\\"terms-form\\">" +
       "<h2>Acknowledge terms</h2>" +
       selectField("t-account", "Account", optionList(items, "id", "pseudonym")) +
@@ -258,6 +265,7 @@ export function managementUiScript(): string {
       if (!account) return;
       mutateAccount(account.id, { version: account.version, termsRevision: $("t-revision").value });
     });
+    $("env-form").addEventListener("submit", createEnvAccount);
     $("i-preview").addEventListener("click", previewImport);
     $("import-form").addEventListener("submit", runImport);
     $("login-form").addEventListener("submit", startLogin);
@@ -297,6 +305,24 @@ export function managementUiScript(): string {
 
   function postAccount(id, act, version, btn) {
     return accountRequest(btn, api("/v1/accounts/" + id + "/" + act, "POST", { version: version }), "Account " + act + " completed.");
+  }
+
+  function createEnvAccount(event) {
+    event.preventDefault();
+    var name = $("e-env").value.trim();
+    if (!/^[A-Z][A-Z0-9_]{2,127}$/.test(name)) {
+      status("Credential env name must be an environment variable name.", "alert");
+      return;
+    }
+    api("/v1/accounts", "POST", {
+      providerId: $("e-provider").value,
+      pseudonym: $("e-pseudo").value,
+      credentialRef: "env:" + name
+    }).then(function (result) {
+      if (!result.ok) return handleError(result, load);
+      status("Direct env account created.");
+      return load();
+    });
   }
 
   var importFingerprint = "";
@@ -354,7 +380,8 @@ export function managementUiScript(): string {
       "<h2>Pool</h2><input type=\\"hidden\\" id=\\"o-id\\"><input type=\\"hidden\\" id=\\"o-version\\">" +
       field("o-name", "Name", "required") +
       selectField("o-provider", "Provider", optionList(cache.providers || [], "id", "name")) +
-      selectField("o-strategy", "Strategy", "<option value=\\"manual\\">manual</option><option value=\\"round-robin\\">round-robin</option><option value=\\"fill-first\\">fill-first</option>") +
+      // eslint-disable-next-line no-useless-escape
+      selectField("o-strategy", "Strategy", "<option value=\\"manual\\">manual</option><option value=\\"round-robin\\">round-robin</option><option value=\\"fill-first\\">fill-first</option><option value=\\"adaptive\\">adaptive</option>") +
       field("o-retry", "Retry budget", "type=\\"number\\" min=\\"0\\" value=\\"0\\"") +
       "<label for=\\"o-accounts\\"><span>Account IDs (comma, pin order)</span><input id=\\"o-accounts\\"></label>" +
       "<button type=\\"submit\\" class=\\"primary\\" id=\\"o-save\\">Save</button></form>";
@@ -387,8 +414,10 @@ export function managementUiScript(): string {
 
   function renderProfiles() {
     var items = cache.profiles || [];
-    $("panel").innerHTML = table(["Name","Harness","Pool","Version",""], items.map(function (item) {
-      return "<tr>" + cell(item.name) + cell(item.harness) + cell(item.poolId) + cell(item.version) +
+    $("panel").innerHTML = table(["Name","Harness","Provider","Pool","Primary","Fast","Reasoning","Version",""], items.map(function (item) {
+      var roles = item.modelRoles || {};
+      return "<tr>" + cell(item.name) + cell(item.harness) + cell(item.providerId) + cell(item.poolId) +
+        cell(roles.primary) + cell(roles.fast) + cell(roles.reasoning) + cell(item.version) +
         "<td><button type=\\"button\\" data-edit-profile=\\"" + escapeHtml(item.id) + "\\">Edit</button></td></tr>";
     }), "No profiles. Create a profile that references a pool.") +
       "<form class=\\"editor\\" id=\\"profile-form\\">" +
@@ -465,12 +494,17 @@ export function managementUiScript(): string {
   }
 
   function renderTraces() {
-    $("panel").innerHTML = table(["When","Request","Profile","Strategy","Selected","Candidates"], (cache.traces || []).map(function (item) {
+    $("panel").innerHTML = table(["When","Request","Profile","Reason","Requested","Resolved","Provider","Adapter","Selected","Candidates"], (cache.traces || []).map(function (item) {
       var selected = item.selected ? item.selected.accountPseudonym + " g" + item.selected.credentialGeneration : "";
+      var reason = item.modelSelection && item.modelSelection.reason ? item.modelSelection.reason : (item.sourceRule || "");
+      var requested = (item.intent && item.intent.sourceSelector) || item.requestedModel;
+      var target = item.effectiveModelDecision && item.effectiveModelDecision.target;
       var candidates = (item.candidates || []).map(function (c) {
         return c.accountPseudonym + (c.eligible ? " eligible" : " " + (c.reasons || []).join(","));
       }).join("; ");
-      return "<tr>" + cell(item.decidedAt) + cell(item.requestId) + cell(item.profileName) + cell(item.strategy) + cell(selected) + cell(candidates) + "</tr>";
+      return "<tr>" + cell(item.decidedAt) + cell(item.requestId) + cell(item.profileName) + cell(reason) +
+        cell(requested) + cell(target && target.physicalModelId) + cell(target && target.accessProviderId) +
+        cell(target && target.adapterId) + cell(selected) + cell(candidates) + "</tr>";
     }), "No route traces in this instance.");
   }
 

@@ -4,7 +4,7 @@
 // Produces the RLY-owned primary distribution artifact for one or more
 // supported/experimental targets: compiled runtime (dist) + bundled runtime
 // dependencies (prod node_modules, symlinks dereferenced) + bundled pinned
-// Node runtime + licenses/notices + exact build identity (#94) + artifact
+// Node runtime + LICENSE + exact build identity (#94) + artifact
 // metadata, enforced by the positive allowlist. Output is a deterministic
 // tarball plus sha256 and a manifest; nothing is ever committed to git.
 //
@@ -130,7 +130,6 @@ async function prepareRuntimeStaging() {
   const staging = await mkdtemp(join(tmpdir(), "rly-runtime-staging-"));
   await cp(join(ROOT, "package.json"), join(staging, "package.json"));
   await cp(join(ROOT, "LICENSE"), join(staging, "LICENSE"));
-  await cp(join(ROOT, "THIRD_PARTY_NOTICES.md"), join(staging, "THIRD_PARTY_NOTICES.md"));
   await cp(join(ROOT, "dist"), join(staging, "dist"), { recursive: true });
   await installProdDependencies(staging);
   return staging;

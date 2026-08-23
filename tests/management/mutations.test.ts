@@ -204,4 +204,62 @@ describe("management mutations", () => {
     });
     expect(wrong.statusCode).toBe(400);
   });
+
+  it("deletes pools, accounts, and providers with a version check", async () => {
+    await start();
+    if (!app) throw new Error("missing app");
+    const provider = await app.inject({
+      method: "POST",
+      url: "/v1/providers",
+      headers: auth,
+      payload: { name: "openrouter", integrationMode: "direct" },
+    });
+    const providerId = String(asRecord(provider.json())["id"]);
+    const account = await app.inject({
+      method: "POST",
+      url: "/v1/accounts",
+      headers: auth,
+      payload: { pseudonym: "acct-del", providerId, credentialHandle: "cred-del" },
+    });
+    const accountId = String(asRecord(account.json())["id"]);
+    const pool = await app.inject({
+      method: "POST",
+      url: "/v1/pools",
+      headers: auth,
+      payload: { name: "pool-del", providerId, strategy: "fill-first", accountIds: [accountId] },
+    });
+    const poolId = String(asRecord(pool.json())["id"]);
+    const stale = await app.inject({
+      method: "DELETE",
+      url: `/v1/pools/${poolId}`,
+      headers: auth,
+      payload: { version: 99 },
+    });
+    expect(stale.statusCode).toBe(409);
+    const deletedPool = await app.inject({
+      method: "DELETE",
+      url: `/v1/pools/${poolId}`,
+      headers: auth,
+      payload: { version: asRecord(pool.json())["version"] },
+    });
+    expect(deletedPool.statusCode).toBe(200);
+    expect(asRecord(deletedPool.json())).toMatchObject({ id: poolId });
+    const deletedAccount = await app.inject({
+      method: "DELETE",
+      url: `/v1/accounts/${accountId}`,
+      headers: auth,
+      payload: { version: asRecord(account.json())["version"] },
+    });
+    expect(deletedAccount.statusCode).toBe(200);
+    const deletedProvider = await app.inject({
+      method: "DELETE",
+      url: `/v1/providers/${providerId}`,
+      headers: auth,
+      payload: { version: asRecord(provider.json())["version"] },
+    });
+    expect(deletedProvider.statusCode).toBe(200);
+    const listed = await app.inject({ method: "GET", url: "/v1/providers", headers: auth });
+    expect(asItems(listed.json())).toHaveLength(0);
+  });
+
 });

@@ -269,6 +269,11 @@ describe("CLI diagnostics", () => {
         profileName: "codex",
         sourceRule: traces.traces?.[0]?.sourceRule,
         selectedPseudonym: "acct-codex-a",
+        modelSelection: {
+          source: "exact",
+          selectedLogicalId: "codex/gpt-5.4",
+          reason: "exact-evidence",
+        },
         effectiveModelDecision: traces.traces?.[0]?.effectiveModelDecision,
       });
       expect(printed.join("\n")).not.toMatch(/access-token-fixture|refresh-token|authorization|prompt|@/i);

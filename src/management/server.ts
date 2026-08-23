@@ -13,6 +13,7 @@ import {
 } from "./auth.js";
 import { bootstrapPageHtml, SESSION_COOKIE_NAME } from "./bootstrap-page.js";
 import { registerManagementCollections } from "./collections.js";
+import { createGovernanceKey, listGovernanceKeys, revokeGovernanceKey } from "./keys.js";
 import { registerCredentialRoutes } from "./credentials.js";
 import type { RouteTraceRing } from "../profiles/traces.js";
 import { toAuditDto, toHealthDto, toPolicyDto, toTraceDto } from "./dtos.js";
@@ -112,7 +113,46 @@ export function createManagementServer(options: ManagementServerOptions): Fastif
     return reply.header("set-cookie", expiredSessionCookie(SESSION_COOKIE_NAME)).send({ loggedOut: true });
   });
 
-  registerManagementCollections(app, authorize, options.store);
+  registerManagementCollections(app, authorize, options.store, options.credentials);
+  // Governance keys CRUD (managementToken auth)
+  app.post("/v1/keys", async (request, reply) => {
+    const auth = authorize(request, reply, false);
+    if (!auth) return;
+    const parsed = z.object({
+      name: z.string().min(1),
+      profileId: z.uuid().optional(),
+      poolId: z.uuid().optional(),
+      budgetUsd: z.number().positive().optional(),
+      rpmLimit: z.number().int().positive().optional(),
+      allowedModels: z.array(z.string().min(1)).optional(),
+    }).safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: "invalid-body", details: parsed.error.issues });
+    const { key, secret } = createGovernanceKey(options.store, {
+      name: parsed.data.name,
+      ...(parsed.data.profileId ? { profileId: parsed.data.profileId } : {}),
+      ...(parsed.data.poolId ? { poolId: parsed.data.poolId } : {}),
+      ...(parsed.data.budgetUsd !== undefined ? { budgetUsd: parsed.data.budgetUsd } : {}),
+      ...(parsed.data.rpmLimit !== undefined ? { rpmLimit: parsed.data.rpmLimit } : {}),
+      ...(parsed.data.allowedModels ? { allowedModels: parsed.data.allowedModels } : {}),
+    });
+    return reply.send({ id: key.id, name: key.name, secret, prefix: key.prefix });
+  });
+  app.get("/v1/keys", async (request, reply) => {
+    const auth = authorize(request, reply, false);
+    if (!auth) return;
+    const keys = listGovernanceKeys(options.store).map(({ hash: _hash, ...rest }) => {
+      void _hash;
+      return rest;
+    });
+    return reply.send({ keys });
+  });
+  app.post("/v1/keys/:id/revoke", async (request, reply) => {
+    const auth = authorize(request, reply, false);
+    if (!auth) return;
+    const { id } = request.params as { id: string };
+    revokeGovernanceKey(options.store, id);
+    return reply.send({ ok: true });
+  });
   if (options.credentials) registerCredentialRoutes(app, authorize, options.credentials);
 
   app.get("/v1/policy", async (request, reply) => {

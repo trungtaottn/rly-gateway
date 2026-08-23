@@ -40,6 +40,7 @@ export type AnthropicModelsRouteDependencies = Readonly<{
   experimentalModels: boolean;
   /** #124: Effective Compatibility Registry — the projection authority. */
   compatibility?: EffectiveCompatibilityRegistry;
+  environment?: NodeJS.ProcessEnv;
   resolveSession: (token: string | undefined) => LaunchSession | undefined;
   extractToken: (headers: Readonly<{ authorization?: string | undefined; "x-api-key"?: string | string[] | undefined }>) => string | undefined;
 }>;
@@ -67,6 +68,7 @@ export function registerAnthropicModelsRoute(app: FastifyInstance, dependencies:
     const universe: ModelUniverseSnapshot = session?.modelUniverse
       ?? compileModelUniverseSnapshot(policy, dependencies.registry, {
         experimentalModels: dependencies.experimentalModels,
+        ...(dependencies.environment === undefined ? {} : { environment: dependencies.environment }),
       });
     // #124: when the Effective Compatibility Registry is wired it is the
     // projection authority — paths lacking effective trusted claims for the
@@ -104,6 +106,8 @@ export function registerAnthropicModelsRoute(app: FastifyInstance, dependencies:
         id: projection.id,
         display_name: projection.displayName,
         created_at: projectionCreatedAt(projection),
+        ...(projection.contextWindow === undefined ? {} : { max_input_tokens: projection.contextWindow }),
+        ...(projection.maxOutput === undefined ? {} : { max_tokens: projection.maxOutput }),
       })),
       has_more: window.length > limit,
       first_id: page[0]?.id ?? null,

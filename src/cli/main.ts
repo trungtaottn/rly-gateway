@@ -5,13 +5,16 @@ import { pathToFileURL } from "node:url";
 import { parseAdminArgs, runAdmin, type AdminCommand } from "./admin.js";
 import { parseConfigArgs, runConfig, type ConfigCommand } from "./config.js";
 import { runDoctor, runQuota, runRouteTrace, runStatus } from "./diagnostics.js";
+import { runCost } from "./cost.js";
 import { runCanaryCommand, type CanaryAction } from "./canary.js";
 import { parseCompatArgs, runCompatCommand, type CompatAction } from "./compat.js";
 import { runGatewayCommand, type GatewayAction } from "./gateway.js";
 import { runInit } from "./init.js";
 import { parseInstallArgs, runInstallCommand, type InstallCommandOptions } from "./install.js";
 import { parseUninstallArgs, runUninstallCommand, type UninstallCommandOptions } from "./uninstall.js";
-import { parseUpdateArgs, runUpdateCommand, assertUpdateLaunchAllowed } from "./update.js";import { loadConfig } from "../config/load-config.js";
+import { parseUpdateArgs, runUpdateCommand, assertUpdateLaunchAllowed } from "./update.js";
+import { loadConfig } from "../config/load-config.js";
+import { assertSecretFree } from "../control-plane/secret-free.js";
 import { ProfileActivationError } from "../profiles/errors.js";
 import { parseLaunchPolicy, type LaunchPolicy } from "../profiles/schema.js";
 import { launchClaude, launchCodex, type ChildExit, type LaunchClaudeOptions } from "../runtime/child-launcher.js";
@@ -36,16 +39,18 @@ const ACTIVATION_CODES = [
   "role-unmapped",
   "capability-rejected",
   "invalid-launch-policy",
+  "context_window_exceeded",
 ] as const satisfies readonly ProfileActivationError["code"][];
 const ROUTE_ROLES = ["primary", "fast", "reasoning"] as const;
 
 function usage(): void {
-  console.log("Usage: rly <profile> [--config path] [--] [claude args] | rly <status|doctor|quota|route-trace> [--config path] | rly --version | admin <providers|accounts|pools|profiles|credentials|ui|models> ... [--config path] | run <claude|codex> [--config path] [--profile name | --route provider/model] -- [harness args] | rly init [--config path] | rly install [--channel beta|stable|current] [--origin url] [--target t] [--version v] [--artifact tarball --metadata-dir dir] [--config path] | rly uninstall [--purge --yes] [--config path] | rly gateway <start|stop|status> [--config path] | rly config [status|ui|providers|accounts|pools|profiles ...] [--config path] [--headless] | rly canary <run|status|run-b|run-c> [--config path] | rly compat <status|review promote|reject|quarantine|lift|explain> [--config path] | rly update [--candidate dir] [--version v] [--channel beta|stable|current] [--origin url] [--target t] [--install-only] [--force] [--wait-timeout ms] [--config path]");
+  console.log("Usage: rly <profile> [--config path] [--] [claude args] | rly <status|doctor|quota|route-trace|cost> [--config path] | rly --version | admin <providers|accounts|pools|profiles|credentials|ui|models> ... [--config path] | run <claude|codex> [--config path] [--profile name | --route provider/model] -- [harness args] | rly init [--config path] | rly install [--channel beta|stable|current] [--origin url] [--target t] [--version v] [--artifact tarball --metadata-dir dir] [--config path] | rly uninstall [--purge --yes] [--config path] | rly gateway <start|stop|status> [--config path] | rly config [status|ui|providers|accounts|pools|profiles ...] [--config path] [--headless] | rly canary <run|status|run-b|run-c> [--config path] | rly compat <status|review promote|reject|quarantine|lift|explain> [--config path] | rly update [--candidate dir] [--version v] [--channel beta|stable|current] [--origin url] [--target t] [--install-only] [--force] [--wait-timeout ms] [--config path]");
 }
 
 export type ParsedCliCommand =
   | Readonly<{ command: "version" }>
   | Readonly<{ command: "status" | "doctor" | "quota" | "route-trace"; configPath: string }>
+  | Readonly<{ command: "cost"; configPath: string; costArgs: readonly string[] }>
   | Readonly<{ command: "run-claude" | "run-codex"; configPath: string; claudeArgs: readonly string[]; route?: string; profile?: string }>
   | Readonly<{ command: "init"; configPath: string }>
   | Readonly<{ command: "install"; options: InstallCommandOptions }>
@@ -150,6 +155,10 @@ export function parseCliArgs(args: readonly string[], cwd = process.cwd()): Pars
   if (isDiagnosticCommand(command)) {
     return { command, configPath: configPath(args.slice(1), cwd) };
   }
+  if (command === "cost") {
+    const rest = args.slice(1);
+    return { command: "cost", configPath: configPath(rest, cwd), costArgs: rest.filter((value, index, all) => value !== "--config" && all[index - 1] !== "--config") };
+  }
   if (command === "admin") {
     return parseAdminArgs(args.filter((value, index, all) => value !== "--config" && all[index - 1] !== "--config"), configPath(args, cwd));
   }
@@ -215,6 +224,16 @@ function detectForHarness(harness: "claude" | "codex"): typeof detectClaudeTarge
   return harness === "codex" ? detectCodexTarget : detectClaudeTarget;
 }
 
+function printPlannedLaunchReceipt(planned: unknown): void {
+  if (planned === null || typeof planned !== "object") return;
+  try {
+    assertSecretFree(planned);
+  } catch {
+    return;
+  }
+  console.log(JSON.stringify({ planned }));
+}
+
 async function issueProfileLaunch(
   lease: GatewayLeaseHandle,
   profileName: string,
@@ -237,6 +256,7 @@ async function issueProfileLaunch(
     harness?: unknown;
     profileId?: unknown;
     launchPolicy?: unknown;
+    planned?: unknown;
     error?: unknown;
   };
   if (!response.ok || typeof payload.token !== "string") {
@@ -248,6 +268,7 @@ async function issueProfileLaunch(
   if (typeof payload.profileId !== "string" || payload.profileId === "") {
     throw new Error("Profile launch did not resolve a profile identity");
   }
+  printPlannedLaunchReceipt(payload.planned);
   let policy: LaunchPolicy;
   try {
     policy = parseLaunchPolicy(payload.launchPolicy);
@@ -414,6 +435,7 @@ export async function runCli(
   if (parsed.command === "doctor") return runDoctor(parsed.configPath);
   if (parsed.command === "status") return runStatus(parsed.configPath);
   if (parsed.command === "quota") return runQuota(parsed.configPath);
+  if (parsed.command === "cost") return runCost(parsed.configPath, parsed.costArgs);
   return runRouteTrace(parsed.configPath);
 }
 

@@ -55,7 +55,7 @@ describe("exact build identity (#94)", () => {
     expect(parsed.releaseChannel).toBe("dev");
     expect(parsed.controlProtocolVersion).toBe(1);
     expect(parsed.dataProtocolVersion).toBe(1);
-    expect(parsed.stateSchemaVersion).toBe(2);
+    expect(parsed.stateSchemaVersion).toBe(4);
     expect(parsed.artifactId).toBe("a".repeat(64));
   });
 
@@ -95,7 +95,7 @@ describe("exact build identity (#94)", () => {
   it("computes a deterministic digest over the exact identity fields", () => {
     const identity = { ...base, artifactId: "a".repeat(64) };
     expect(buildIdentityDigest(identity)).toBe(createHash("sha256").update([
-      "rly-gateway", "0.1.0", "abc123", "build-1", "dev", "1", "1", "2", "a".repeat(64),
+      "rly-gateway", "0.1.0", "abc123", "build-1", "dev", "1", "1", "4", "a".repeat(64),
     ].join("\0")).digest("hex"));
     // The artifact digest participates: same identity, different artifact ⇒
     // different identity digest.

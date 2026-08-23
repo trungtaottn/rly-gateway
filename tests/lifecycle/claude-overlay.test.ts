@@ -261,6 +261,74 @@ describe("RLY Claude configuration overlay", () => {
     });
   });
 
+  it("composes overlay settings from launch policy when native settings are absent", async () => {
+    const home = await temporaryHome();
+    const controlPlane = join(home, ".rly");
+    const first = await prepareClaudeOverlay(controlPlane, {
+      environment: nativeEnvironment(home),
+      explicit: { model: "claude-opus-4-8" },
+    });
+    expect(first.composed).toBe(true);
+    const paths = claudeOverlayPaths(controlPlane);
+    expect(JSON.parse(await readFile(paths.settings, "utf8"))).toMatchObject({ model: "claude-opus-4-8" });
+
+    const same = await prepareClaudeOverlay(controlPlane, {
+      environment: nativeEnvironment(home),
+      explicit: { model: "claude-opus-4-8" },
+    });
+    expect(same.composed).toBe(false);
+
+    const changed = await prepareClaudeOverlay(controlPlane, {
+      environment: nativeEnvironment(home),
+      explicit: { model: "claude-haiku-4-5" },
+    });
+    expect(changed.composed).toBe(true);
+    expect(JSON.parse(await readFile(paths.settings, "utf8"))).toMatchObject({ model: "claude-haiku-4-5" });
+
+    await writeFile(paths.settings, JSON.stringify({ model: `${RLY_MODEL_PREFIX}fast-0` }), "utf8");
+    const persisted = await prepareClaudeOverlay(controlPlane, {
+      environment: nativeEnvironment(home),
+      explicit: { model: "claude-opus-4-8" },
+    });
+    expect(persisted.composed).toBe(true);
+    expect(JSON.parse(await readFile(paths.settings, "utf8"))).toMatchObject({ model: `${RLY_MODEL_PREFIX}fast-0` });
+  });
+
+  it("recomposes when launch policy changes even if native settings are unchanged", async () => {
+    const home = await temporaryHome();
+    const controlPlane = join(home, ".rly");
+    const native = join(home, ".claude");
+    await mkdir(native);
+    const nativeSettings = join(native, "settings.json");
+    await writeFile(nativeSettings, JSON.stringify({ model: "claude-sonnet-4-5", theme: "dark" }), "utf8");
+    const first = await prepareClaudeOverlay(controlPlane, {
+      environment: nativeEnvironment(home),
+      explicit: { model: "claude-opus-4-8" },
+    });
+    expect(first.composed).toBe(true);
+    const paths = claudeOverlayPaths(controlPlane);
+    expect(JSON.parse(await readFile(paths.settings, "utf8"))).toMatchObject({
+      model: "claude-opus-4-8",
+      theme: "dark",
+    });
+
+    const same = await prepareClaudeOverlay(controlPlane, {
+      environment: nativeEnvironment(home),
+      explicit: { model: "claude-opus-4-8" },
+    });
+    expect(same.composed).toBe(false);
+
+    const changed = await prepareClaudeOverlay(controlPlane, {
+      environment: nativeEnvironment(home),
+      explicit: { model: "claude-haiku-4-5" },
+    });
+    expect(changed.composed).toBe(true);
+    expect(JSON.parse(await readFile(paths.settings, "utf8"))).toMatchObject({
+      model: "claude-haiku-4-5",
+      theme: "dark",
+    });
+  });
+
   it("skips malformed native settings without failing the launch or touching native files", async () => {
     const home = await temporaryHome();
     const controlPlane = join(home, ".rly");

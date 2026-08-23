@@ -72,7 +72,8 @@ export function registerCredentialRoutes(
     const parsed = z.object({ version: versionSchema }).parse(request.body);
     const id = parseId(request.params, reply);
     if (!id) return;
-    return toAccountDto(await credentials.select(id, parsed.version, actor), "ready");
+    const account = await credentials.select(id, parsed.version, actor);
+    return toAccountDto(account, await credentials.readiness(account));
   });
 }
 

@@ -21,7 +21,7 @@ plans
 /docs/
 /AGENTS.md
 /CLAUDE.md
-
+/.agents/
 # Playwright artifacts
 test-results/
 playwright-report/

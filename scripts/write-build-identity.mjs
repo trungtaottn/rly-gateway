@@ -43,8 +43,13 @@ const meta = {
   releaseChannel,
   controlProtocolVersion: 1,
   dataProtocolVersion: 1,
-  stateSchemaVersion: 2,
+  stateSchemaVersion: await (async () => {
+    try {
+      const schema = await readFile(join(root, "src/storage/schema-v4.ts"), "utf8");
+      const m = schema.match(/SCHEMA_V4_VERSION\s*=\s*(\d+)/);
+      return m ? Number(m[1]) : 4;
+    } catch { return 4; }
+  })(),
 };
-
 await mkdir(join(root, "dist"), { recursive: true });
 await writeFile(join(root, "dist", "rly-build.json"), `${JSON.stringify(meta, null, 2)}\n`);

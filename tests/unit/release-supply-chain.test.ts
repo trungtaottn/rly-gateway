@@ -129,7 +129,6 @@ async function fixtureArtifactRoot(overrides: { extraPackages?: Array<[string, s
     dependencies: { "fixture-dep": "1.0.0" },
   }, null, 2));
   await writeFile(join(root, "LICENSE"), "MIT License\nCopyright (c) 2026 Trung Tao\n");
-  await writeFile(join(root, "THIRD_PARTY_NOTICES.md"), "# Third-party notices\n\nMIT License\n");
   await mkdir(join(root, "dist", "cli"), { recursive: true });
   await writeFile(join(root, "dist", "cli", "main.js"), [
     'import { readFileSync } from "node:fs";',

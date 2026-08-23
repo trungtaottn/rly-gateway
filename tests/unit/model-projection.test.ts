@@ -3,6 +3,8 @@ import type { ProviderCapabilities } from "../../src/core/capabilities.js";
 import type { PolicyRevision, ProfileRecord, ProviderRecord } from "../../src/control-plane/types.js";
 import {
   MODEL_REGISTRY_REVISION,
+  directProviderRegistry,
+  findModelEvidence,
   reviewedModel,
   type RegistryDocument,
 } from "../../src/registry/model-registry.js";
@@ -11,6 +13,7 @@ import {
   createModelProjectionTrace,
   humanizeModelId,
   projectModelUniverse,
+  projectionFor,
   projectionIdFor,
   providerDisplayName,
   resolveProjection,
@@ -158,6 +161,24 @@ describe("model projection ids", () => {
   });
 });
 
+describe("projection limits", () => {
+  it("copies numeric registry limits onto the projection and omits empty limits", () => {
+    const evidence = findModelEvidence(directProviderRegistry, "openrouter", "deepseek/deepseek-v4-flash-0731");
+    if (evidence === undefined) throw new Error("missing OpenRouter DeepSeek V4 Flash 0731 evidence");
+    const binding = Object.freeze({ providerId: "p-or", providerName: "openrouter", poolId: "pool-or" });
+    const projection = projectionFor(binding, evidence);
+    expect(projection.contextWindow).toBe(1_310_720);
+    expect(projection.maxOutput).toBe(393_216);
+    expect(projection.displayName).toBe("DeepSeek V4 Flash 0731 (OpenRouter)");
+
+    const unlimited = findModelEvidence(directProviderRegistry, "openrouter", "nvidia/nemotron-3.5-lightning:free");
+    if (unlimited === undefined) throw new Error("missing OpenRouter Nemotron evidence");
+    const bare = projectionFor(binding, unlimited);
+    expect(bare).not.toHaveProperty("contextWindow");
+    expect(bare).not.toHaveProperty("maxOutput");
+  });
+});
+
 describe("model universe projection", () => {
   it("projects VERIFIED models from every pinned binding and nothing else", () => {
     const snapshot = compileModelUniverseSnapshot(multiProviderPolicy, registry, {
@@ -234,6 +255,47 @@ describe("model universe projection", () => {
       profile: profile({ name: "work", poolId: "pool-codex", providerId: "p-codex" }),
     });
     expect(disabledSnapshot.bindings.map((binding) => binding.providerName)).toEqual(["codex", "deepseek"]);
+  });
+
+  it("excludes env accounts that are missing credentials or terms", () => {
+    const openrouter = Object.freeze({
+      ...provider("p-or", "openrouter"),
+      integrationMode: "direct" as const,
+      requiredTermsRevision: "terms-1",
+    });
+    const envAccount = Object.freeze({
+      ...account("a-or", "p-or"),
+      credentialHandle: "env:OPENROUTER_API_KEY",
+    });
+    const envPool = pool("pool-or", "p-or", ["a-or"]);
+    const envPolicy = policy({
+      providers: [codexProvider, openrouter],
+      pools: [codexPool, envPool],
+      accounts: [codexAccount, envAccount],
+      profiles: [profile({ name: "work", poolId: "pool-or", providerId: "p-or" })],
+    });
+    const missing = compileModelUniverseSnapshot(envPolicy, registry, {
+      profile: profile({ name: "work", poolId: "pool-or", providerId: "p-or" }),
+      environment: {},
+    });
+    expect(missing.bindings.map((binding) => binding.providerName)).toEqual(["codex"]);
+    const presentUnacked = compileModelUniverseSnapshot(envPolicy, registry, {
+      profile: profile({ name: "work", poolId: "pool-or", providerId: "p-or" }),
+      environment: { OPENROUTER_API_KEY: "fixture-key" },
+    });
+    expect(presentUnacked.bindings.map((binding) => binding.providerName)).toEqual(["codex"]);
+    const ackedAccount = Object.freeze({ ...envAccount, termsAcknowledgedRevision: "terms-1" });
+    const ackedPolicy = policy({
+      providers: [codexProvider, openrouter],
+      pools: [codexPool, envPool],
+      accounts: [codexAccount, ackedAccount],
+      profiles: [profile({ name: "work", poolId: "pool-or", providerId: "p-or" })],
+    });
+    const runnable = compileModelUniverseSnapshot(ackedPolicy, registry, {
+      profile: profile({ name: "work", poolId: "pool-or", providerId: "p-or" }),
+      environment: { OPENROUTER_API_KEY: "fixture-key" },
+    });
+    expect(runnable.bindings.map((binding) => binding.providerName)).toEqual(["codex", "openrouter"]);
   });
 
   it("compiles the same universe without a profile (instance-token surface)", () => {

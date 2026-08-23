@@ -123,6 +123,17 @@ describe("rly init", () => {
     expect(installation.bootstrapPath).toBe(bootstrapScriptPath(controlPlaneDirectory));
     expect(installation.definitionRevision).toMatch(/^[0-9a-f]{64}$/);
 
+    const pointer = JSON.parse(await readFile(join(homeDir, ".rly", "installation.json"), "utf8")) as {
+      dataDirectory: string;
+      configPath: string;
+      bootstrapPath?: string;
+      definitionRevision?: string;
+    };
+    expect(pointer.dataDirectory).toBe(controlPlaneDirectory);
+    expect(pointer.configPath).toBe(configPath);
+    expect(pointer.bootstrapPath).toBe(installation.bootstrapPath);
+    expect(pointer.definitionRevision).toBe(installation.definitionRevision);
+
     const payload = parseOutput(output);
     expect(payload.ok).toBe(true);
     expect(payload.initialized).toBe(true);

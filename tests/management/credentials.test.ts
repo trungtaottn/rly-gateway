@@ -187,4 +187,89 @@ describe("management credential operations", () => {
     expect(missing.statusCode).toBe(400);
     expect(asRecord(missing.json())["error"]).toBe("invalid");
   });
+
+  it("creates a ready direct env account from a credential reference", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "rly-gateway-mgmt-env-"));
+    directories.push(directory);
+    store = await ControlPlaneStore.open(directory);
+    broker = await CredentialBroker.open(directory, { oauth: fakeOauth() });
+    const environment: NodeJS.ProcessEnv = {};
+    const credentials = new CredentialService(store, broker, environment);
+    app = createManagementServer({
+      host: "127.0.0.1",
+      port: 17872,
+      origin: "http://127.0.0.1:17872",
+      managementToken: "mgmt-secret",
+      instanceId: "00000000-0000-4000-8000-000000000099",
+      configFingerprint: "a".repeat(64),
+      store,
+      sessions: new SessionStore(),
+      credentials,
+    });
+    const provider = await app.inject({
+      method: "POST",
+      url: "/v1/providers",
+      headers: auth,
+      payload: { name: "openrouter", integrationMode: "direct" },
+    });
+    const providerId = String(asRecord(provider.json())["id"]);
+    const created = await app.inject({
+      method: "POST",
+      url: "/v1/accounts",
+      headers: auth,
+      payload: { pseudonym: "acct-or", providerId, credentialRef: "env:OPENROUTER_API_KEY" },
+    });
+    expect(created.statusCode).toBe(201);
+    const createdBody = asRecord(created.json());
+    expect(createdBody).toMatchObject({
+      pseudonym: "acct-or",
+      credentialHandle: "env:OPENROUTER_API_KEY",
+      generation: 1,
+      state: "ready",
+      readiness: "unready",
+    });
+    expect(JSON.stringify(created.json())).not.toMatch(/sk-|Bearer|secret-value/i);
+    const listed = await app.inject({ method: "GET", url: "/v1/accounts", headers: auth });
+    const items = asRecord(listed.json())["items"];
+    expect(Array.isArray(items)).toBe(true);
+    expect(asRecord((items as unknown[])[0])).toMatchObject({ readiness: "unready", generation: 1, state: "ready" });
+    const selectedUnready = await app.inject({
+      method: "POST",
+      url: `/v1/accounts/${String(createdBody["id"])}/select`,
+      headers: auth,
+      payload: { version: createdBody["version"] },
+    });
+    expect(selectedUnready.statusCode).toBe(409);
+    expect(asRecord(selectedUnready.json())).toMatchObject({ error: "credential-unready" });
+    environment.OPENROUTER_API_KEY = "fixture-key";
+    const listedReady = await app.inject({ method: "GET", url: "/v1/accounts", headers: auth });
+    expect(asRecord((asRecord(listedReady.json())["items"] as unknown[])[0])).toMatchObject({ readiness: "ready" });
+    const selectedReady = await app.inject({
+      method: "POST",
+      url: `/v1/accounts/${String(createdBody["id"])}/select`,
+      headers: auth,
+      payload: { version: createdBody["version"] },
+    });
+    expect(selectedReady.statusCode).toBe(200);
+    expect(asRecord(selectedReady.json())).toMatchObject({ readiness: "ready" });
+    const rejected = await app.inject({
+      method: "POST",
+      url: "/v1/accounts",
+      headers: auth,
+      payload: { pseudonym: "acct-secret", providerId, credentialRef: "sk-live-not-an-env" },
+    });
+    expect(rejected.statusCode).toBe(400);
+    const generic = await app.inject({
+      method: "POST",
+      url: "/v1/accounts",
+      headers: auth,
+      payload: { pseudonym: "acct-generic", providerId, credentialHandle: "env:OPENROUTER_API_KEY" },
+    });
+    expect(generic.statusCode).toBe(201);
+    expect(asRecord(generic.json())).toMatchObject({
+      credentialHandle: "env:OPENROUTER_API_KEY",
+      generation: 0,
+      state: "unready",
+    });
+  });
 });

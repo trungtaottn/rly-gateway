@@ -73,6 +73,32 @@ export function toProfileDto(record: ProfileRecord): Readonly<Record<string, unk
   });
 }
 
+const PLANNED_MODEL_ROLES = ["primary", "fast", "reasoning"] as const;
+
+/** Secret-free pre-request launch receipt. Never request-time/effective decisions. */
+export function toPlannedLaunchDto(input: Readonly<{
+  provider: Readonly<{ id: string; name: string }>;
+  pool: Readonly<{ id: string; name: string }>;
+  modelRoles: Readonly<Record<string, string>>;
+  policyRevision: number;
+  launchPolicyModel?: string | undefined;
+}>): Readonly<Record<string, unknown>> {
+  const modelRoles: Record<string, string> = {};
+  for (const role of PLANNED_MODEL_ROLES) {
+    const mapped = input.modelRoles[role];
+    if (typeof mapped === "string") modelRoles[role] = mapped;
+  }
+  return secretFree({
+    providerId: input.provider.id,
+    providerName: input.provider.name,
+    poolId: input.pool.id,
+    poolName: input.pool.name,
+    modelRoles,
+    policyRevision: input.policyRevision,
+    ...(typeof input.launchPolicyModel === "string" ? { launchPolicyModel: input.launchPolicyModel } : {}),
+  });
+}
+
 export function toPolicyDto(record: PolicyRevision): Readonly<Record<string, unknown>> {
   return secretFree({
     revision: record.revision,

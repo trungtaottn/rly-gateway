@@ -1,11 +1,13 @@
 import type { GatewayConfig } from "../../config/schema.js";
 import type { CanonicalEvent } from "../../core/canonical-event.js";
 import type { CanonicalRequest } from "../../core/canonical-request.js";
-import { reasoningRequestFromWire } from "../../core/reasoning.js";
+import { reasoningRequestFromWire, type ResolvedReasoning } from "../../core/reasoning.js";
 import { decideRoute, UnsupportedRouteError, type RouteRecord } from "../../core/router.js";
 import { conservativeTokenCount } from "../../core/token-counting.js";
 import type { CanonicalUpstream } from "../../protocols/anthropic/fake-upstream.js";
-import { resolveConfiguredRoute, routesFromConfig } from "../../registry/model-registry.js";
+import { ProfileActivationError } from "../../profiles/errors.js";
+import { directProviderRegistry, findModelEvidence, resolveConfiguredRoute, routesFromConfig, type RegistryDocument } from "../../registry/model-registry.js";
+import { preflightContextWindow } from "../../registry/tokenizer-registry.js";
 import { providerContract } from "../catalog.js";
 import { createProviderAdapter } from "../dispatch.js";
 import { ReasoningTranslationError, resolveReasoning } from "../reasoning.js";
@@ -13,8 +15,8 @@ import { ReasoningTranslationError, resolveReasoning } from "../reasoning.js";
 export type ResolvedDirectRoute = Readonly<{ route: RouteRecord; upstream: CanonicalUpstream }>;
 
 /** Resolves only an explicit configured role or exact configured model; never falls back. */
-export function createDirectRouteResolver(config: GatewayConfig, configFingerprint: string, environment: NodeJS.ProcessEnv = process.env): (request: CanonicalRequest) => ResolvedDirectRoute | undefined {
-  const routes = routesFromConfig(config);
+export function createDirectRouteResolver(config: GatewayConfig, configFingerprint: string, environment: NodeJS.ProcessEnv = process.env, registry: RegistryDocument = directProviderRegistry): (request: CanonicalRequest) => ResolvedDirectRoute | undefined {
+  const routes = routesFromConfig(config, registry);
   return (request) => {
     const route = resolveConfiguredRoute(routes, request.requestedModel);
     if (!route) return undefined;
@@ -22,6 +24,11 @@ export function createDirectRouteResolver(config: GatewayConfig, configFingerpri
     const baseUrl = role === undefined ? undefined : config.routes[role]?.baseUrl;
     const contract = providerContract(route.providerId);
     if (!contract || contract.integrationMode !== "direct") return undefined;
+    const evidence = findModelEvidence(registry, route.providerId, route.modelId);
+    const gate = preflightContextWindow(request, evidence, `${route.providerId}/${route.modelId}`);
+    if (gate.exceeded) {
+      throw new ProfileActivationError("context_window_exceeded", `context_window_exceeded: ${String(gate.count)} > ${String(gate.limit ?? 0)}`);
+    }
     const adapter = createProviderAdapter({
       provider: {
         id: "00000000-0000-4000-8000-000000000000",
@@ -64,7 +71,7 @@ export function createDirectRouteResolver(config: GatewayConfig, configFingerpri
  * fail closed on the existing unsupported-route contract instead of being
  * silently downgraded; routes without reasoning evidence emit no control.
  */
-function resolvedFor(route: RouteRecord, request: CanonicalRequest): ReturnType<typeof resolveReasoning> | undefined {
+function resolvedFor(route: RouteRecord, request: CanonicalRequest): ResolvedReasoning | undefined {
   if (route.reasoningEvidence === undefined) return undefined;
   const reasoningRequest = request.inference.reasoning ?? reasoningRequestFromWire({});
   try {

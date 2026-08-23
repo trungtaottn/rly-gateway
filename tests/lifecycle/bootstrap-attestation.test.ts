@@ -17,7 +17,7 @@ import { defaultBuildIdentity, buildIdentityDigest, type BuildIdentity } from ".
 import { resolveActiveDeployment } from "../../src/runtime/bootstrap.js";
 import { runtimePaths } from "../../src/storage/paths.js";
 import type { ServiceManagerAdapter, ServiceStatus } from "../../src/service-manager/types.js";
-import { SCHEMA_V2_VERSION } from "../../src/storage/schema-v2.js";
+import { SCHEMA_V4_VERSION } from "../../src/storage/schema-v4.js";
 
 const directories: string[] = [];
 const servers: Server[] = [];
@@ -73,7 +73,7 @@ async function candidateDir(root: string, version: string): Promise<string> {
   await chmod(join(source, "dist"), 0o700);
   await chmod(join(source, "dist", "cli"), 0o700);
   await writeFile(join(source, "dist", "cli", "main.js"), `// rly ${version}\n`, "utf8");
-  await writeFile(join(source, "rly.json"), JSON.stringify({ product: "rly-gateway", version, stateVersion: 2, migrationClass: "backward-compatible-expand" }), "utf8");
+  await writeFile(join(source, "rly.json"), JSON.stringify({ product: "rly-gateway", version, stateVersion: 4, migrationClass: "backward-compatible-expand" }), "utf8");
   return source;
 }
 
@@ -272,7 +272,7 @@ describe("bootstrap attestation and exact build identity (#94)", () => {
       candidate: { version: "2.0.0", sourceDirectory: src2 },
       updateStore: store,
       cliRuntimeVersion: RUNTIME_VERSION,
-      cliStateVersion: SCHEMA_V2_VERSION,
+      cliStateVersion: SCHEMA_V4_VERSION,
     });
     expect(result.outcome).toBe("rolled-back");
     expect(result.state).toBe("active");
@@ -311,7 +311,7 @@ describe("bootstrap attestation and exact build identity (#94)", () => {
       candidate: { version: "2.0.0", sourceDirectory: src2 },
       updateStore: store,
       cliRuntimeVersion: RUNTIME_VERSION,
-      cliStateVersion: SCHEMA_V2_VERSION,
+      cliStateVersion: SCHEMA_V4_VERSION,
     });
     expect(result.outcome).toBe("activated");
     expect(result.state).toBe("active");
@@ -358,7 +358,7 @@ describe("bootstrap attestation and exact build identity (#94)", () => {
       candidate: { version: "2.0.0", sourceDirectory: src2 },
       updateStore: store,
       cliRuntimeVersion: RUNTIME_VERSION,
-      cliStateVersion: SCHEMA_V2_VERSION,
+      cliStateVersion: SCHEMA_V4_VERSION,
     });
     expect(result.outcome).toBe("activated");
     expect(afterSwitch.artifactId).toBe(id2);

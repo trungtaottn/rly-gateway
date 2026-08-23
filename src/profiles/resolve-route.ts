@@ -12,6 +12,7 @@ import { parseCredentialRef } from "../credentials/credential-ref.js";
 import type { CanonicalUpstream } from "../protocols/anthropic/fake-upstream.js";
 import { adapterIdFor, createProviderAdapter } from "../providers/dispatch.js";
 import { ReasoningTranslationError, resolveReasoning } from "../providers/reasoning.js";
+import { preflightContextWindow } from "../registry/tokenizer-registry.js";
 import { directProviderRegistry, modelsForProvider, type RegistryDocument } from "../registry/model-registry.js";
 import type { EffectiveCompatibilityRegistry } from "../compatibility/registry.js";
 import type { EffectiveCompatibilityLabel, EffectiveEnforcement } from "../compatibility/types.js";
@@ -21,8 +22,9 @@ import { createModelProjectionTrace, resolveProjection } from "../routing/model-
 import type { ModelProjectionTrace } from "../routing/model-projection/types.js";
 import { toRouteDecision, type EffectiveRoute } from "../routing/effective-route.js";
 import type { CredentialSnapshot } from "../routing/eligibility/reasons.js";
+import { createDecisionTrace } from "../routing/eligibility/trace.js";
 import { isModelSelectionError } from "../routing/model-selection/errors.js";
-import { selectModel } from "../routing/model-selection/selector.js";
+import { createModelSelectionTrace, selectModel } from "../routing/model-selection/selector.js";
 import type { ModelSelectionResult, ReasoningRequirement } from "../routing/model-selection/types.js";
 import { streamPoolRequest } from "../routing/pools/execute.js";
 import type { RouteSelector } from "../routing/pools/selector.js";
@@ -99,7 +101,22 @@ export async function resolveProfileRoute(
   // typed tier intent (`rly-tier:*` or a client-native alias mapped through
   // the explicit client-alias contract) — never by bare string equality with
   // a tier name.
-  const intent = classifyIntentForRequest(canonical.requestedModel);
+  let intent: ModelIntent;
+  try {
+    intent = classifyIntentForRequest(canonical.requestedModel);
+  } catch (error) {
+    recordPreSelectionFailure({
+      traces: dependencies.traces,
+      session,
+      policy,
+      pool,
+      request: canonical,
+      error,
+      attemptedLogicalId: `${provider.name}/${canonical.requestedModel}`,
+      intent: failureIntentTrace(canonical.requestedModel),
+    });
+    throw error;
+  }
   // #124: the Effective Compatibility Registry is the compatibility authority —
   // feature-scoped effective trust/health/freshness/quarantine/enforcement,
   // never the static registry state alone. Resolved once per request and
@@ -111,15 +128,30 @@ export async function resolveProfileRoute(
     canonical,
     directProviderRegistry,
   );
-  const intentResolution = resolveModelIntent(
-    intent,
-    canonical,
-    provider.name,
-    inspected.profile,
-    dependencies.required ?? [],
-    parentReference?.context,
-    effectiveSnapshot,
-  );
+  let intentResolution: ReturnType<typeof resolveModelIntent>;
+  try {
+    intentResolution = resolveModelIntent(
+      intent,
+      canonical,
+      provider.name,
+      inspected.profile,
+      dependencies.required ?? [],
+      parentReference?.context,
+      effectiveSnapshot,
+    );
+  } catch (error) {
+    recordPreSelectionFailure({
+      traces: dependencies.traces,
+      session,
+      policy,
+      pool,
+      request: canonical,
+      error,
+      attemptedLogicalId: `${provider.name}/${canonical.requestedModel}`,
+      intent: intentTraceFor(intent, {}),
+    });
+    throw error;
+  }
   const resolvedModelId = intentResolution.modelId;
   const resolvedRole = intentResolution.role;
   const tierResolution = intentResolution.tierResolution;
@@ -128,15 +160,29 @@ export async function resolveProfileRoute(
   // registry, BEFORE any account/pool selection. The selected physical model is
   // frozen into the effective request/route; account failover can never change it.
   const reasoningRequest = canonical.inference.reasoning ?? reasoningRequestFromWire({});
-  const selection = selectModelForRequest(
-    resolvedModelId,
-    provider.name,
-    dependencies.required ?? [],
-    canonical,
-    directProviderRegistry,
-    effectiveSnapshot,
-    dependencies.compatibility?.policy.allowQuarantineBypass,
-  );
+  let selection: ModelSelectionResult;
+  try {
+    selection = selectModelForRequest(
+      resolvedModelId,
+      provider.name,
+      dependencies.required ?? [],
+      canonical,
+      directProviderRegistry,
+      effectiveSnapshot,
+      dependencies.compatibility?.policy.allowQuarantineBypass,
+    );
+  } catch (error) {
+    recordPreSelectionFailure({
+      traces: dependencies.traces,
+      session,
+      policy,
+      pool,
+      request: canonical,
+      error,
+      attemptedLogicalId: `${provider.name}/${resolvedModelId}`,
+    });
+    throw error;
+  }
   const modelEvidence = selection.model;
   // Stage 1b (#70): translate the canonical reasoning intent into the selected
   // model's native control through the provider-owned boundary, BEFORE account
@@ -267,6 +313,35 @@ export async function resolveProfileRoute(
     requestedModel: activated.modelId,
     modelRole: activated.role,
   });
+  {
+    const gate = preflightContextWindow(effectiveRequest, modelEvidence, `${provider.name}/${activated.modelId}`);
+    if (gate.exceeded) {
+      const error = new ProfileActivationError("context_window_exceeded", `context_window_exceeded: ${String(gate.count)} > ${String(gate.limit ?? 0)}`);
+      recordPreSelectionFailure({
+        traces: dependencies.traces,
+        session,
+        policy,
+        pool,
+        request: canonical,
+        error,
+        attemptedLogicalId: `${provider.name}/${activated.modelId}`,
+        intent: intentTrace,
+      });
+      throw error;
+    }
+  }
+  // P1: enforce governance allowedModels on resolved physical model (not just requested alias)
+  {
+    const govKeyId = (canonical as unknown as Record<string, unknown>).__governanceKeyId as string | undefined
+      ?? (effectiveRequest as unknown as Record<string, unknown>).__governanceKeyId as string | undefined;
+    if (typeof govKeyId === "string" && govKeyId.length > 0) {
+      const row = dependencies.store.database.prepare("SELECT allowed_models as allowed FROM governance_keys WHERE id = ?").get(govKeyId) as { allowed: string | null } | undefined;
+      const allowed = row?.allowed === null || row?.allowed === undefined ? undefined : JSON.parse(row.allowed) as readonly string[] | undefined;
+      if (allowed !== undefined && allowed.length > 0 && !allowed.includes(activated.modelId) && !allowed.includes(`${provider.name}/${activated.modelId}`)) {
+        throw new ProfileActivationError("capability-rejected", `model ${activated.modelId} not allowed for this key`);
+      }
+    }
+  }
   return {
     route,
     decision,
@@ -360,15 +435,29 @@ export async function resolveProjectedModelRoute(
     canonical,
     registry,
   );
-  const selection = selectModelForRequest(
-    resolved.evidence.identity.upstreamModelId,
-    provider.name,
-    dependencies.required ?? [],
-    canonical,
-    registry,
-    effectiveSnapshot,
-    dependencies.compatibility?.policy.allowQuarantineBypass,
-  );
+  let selection: ModelSelectionResult;
+  try {
+    selection = selectModelForRequest(
+      resolved.evidence.identity.upstreamModelId,
+      provider.name,
+      dependencies.required ?? [],
+      canonical,
+      registry,
+      effectiveSnapshot,
+      dependencies.compatibility?.policy.allowQuarantineBypass,
+    );
+  } catch (error) {
+    recordPreSelectionFailure({
+      traces: dependencies.traces,
+      session,
+      policy,
+      pool,
+      request: canonical,
+      error,
+      attemptedLogicalId: resolved.evidence.logicalId,
+    });
+    throw error;
+  }
   const modelEvidence = selection.model;
   // Stage 1b (#70): translate the canonical reasoning intent into the selected
   // model's native control; fail closed on untranslatable explicit intents.
@@ -419,6 +508,23 @@ export async function resolveProjectedModelRoute(
     modelId: modelEvidence.identity.upstreamModelId,
     role: "unknown",
   });
+  {
+    const gate = preflightContextWindow(effectiveRequest, modelEvidence, `${provider.name}/${modelEvidence.identity.upstreamModelId}`);
+    if (gate.exceeded) {
+      const error = new ProfileActivationError("context_window_exceeded", `context_window_exceeded: ${String(gate.count)} > ${String(gate.limit ?? 0)}`);
+      recordPreSelectionFailure({
+        traces: dependencies.traces,
+        session,
+        policy,
+        pool,
+        request: canonical,
+        error,
+        attemptedLogicalId: modelEvidence.logicalId,
+        intent: intentTrace,
+      });
+      throw error;
+    }
+  }
   // #127: assemble the FINAL model-control output BEFORE account selection for
   // the exact projected target. The projection reverse-mapping is the only
   // bridge from the selection handle to the frozen physical target (#72); a
@@ -492,6 +598,51 @@ export async function resolveProjectedModelRoute(
 
 function envCredentialName(handle: string): string | undefined {
   return handle.startsWith("env:") ? handle.slice(4) : undefined;
+}
+
+/** Secret-free pre-account-selection failure evidence for `rly route-trace`. */
+function failureIntentTrace(selector: string): ModelIntentTrace {
+  if (selector.startsWith("rly-tier:")) {
+    return Object.freeze({ kind: "RLY_LOGICAL_TIER", sourceSelector: selector, source: "rly-tier-namespace" });
+  }
+  return Object.freeze({ kind: "EXACT_CLIENT_MODEL", sourceSelector: selector, source: "exact-model" });
+}
+
+function recordPreSelectionFailure(input: Readonly<{
+  traces: RouteTraceRing;
+  session: LaunchSession;
+  policy: PolicyRevision;
+  pool: PoolRecord;
+  request: CanonicalRequest;
+  error: unknown;
+  attemptedLogicalId: string;
+  intent?: ModelIntentTrace;
+}>): void {
+  if (!(input.error instanceof ProfileActivationError)) return;
+  const reason = input.error.modelFailure ?? input.error.tierFailure ?? input.error.intentFailure ?? input.error.code;
+  input.traces.push(
+    createDecisionTrace({
+      requestId: input.request.id,
+      policyRevision: input.policy.revision,
+      policyHash: input.policy.hash,
+      strategy: input.pool.strategy,
+      sourceRule: `model-selection:${reason}`,
+      candidates: [],
+      decidedAt: new Date().toISOString(),
+    }),
+    input.session.profileName,
+    createModelSelectionTrace({
+      source: "exact",
+      selectedLogicalId: input.attemptedLogicalId,
+      reason,
+      candidates: [],
+    }),
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    input.intent,
+  );
 }
 
 function translationFailureCode(code: "unsupported-reasoning" | "no-budget-policy"): "reasoning-translation-unsupported" | "reasoning-budget-policy-missing" {

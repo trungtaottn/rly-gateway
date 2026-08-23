@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { CanonicalEvent } from "../../core/canonical-event.js";
 import type { CanonicalRequest } from "../../core/canonical-request.js";
 import { classifyProviderFailure, cooldownUntilFor, nextQuotaClass } from "../../control-plane/health/outcomes.js";
@@ -6,6 +7,10 @@ import type { ControlPlaneStore } from "../../control-plane/store.js";
 import type { CommitmentState } from "../../providers/commitment.js";
 import { commitmentOf } from "../../providers/provider-error.js";
 import { ProviderAdapterError } from "../../providers/provider-adapter.js";
+import { appendEntrySync } from "../../ledger/sqlite.js";
+import { estimateCost } from "../../ledger/price-registry.js";
+import { recordKeyUsage } from "../../management/keys.js";
+import { updateAdaptiveHealth } from "./adaptive.js";
 import { parseAffinity } from "./affinity.js";
 import type { EffectiveRoute } from "../effective-route.js";
 import { markOutputStarted } from "../effective-route.js";
@@ -64,6 +69,9 @@ export async function* streamPoolRequest(input: PoolRequestInput & {
   const affinity = parseAffinity(pool?.affinity);
   const tried: string[] = [];
   let lastError: Error | undefined;
+  const ledgerEventId = randomUUID();
+  let pendingInputTokens: number | undefined;
+  let pendingOutputTokens: number | undefined;
 
   attempt: for (let rotationsUsed = 0; rotationsUsed < retryBudget + 1; rotationsUsed += 1) {
     let selected;
@@ -93,6 +101,7 @@ export async function* streamPoolRequest(input: PoolRequestInput & {
     // now enforces the invariant itself so a future/regressed adapter can
     // never silently record success on a cut-off response.
     let terminal = false;
+    const attemptStart = Date.now();
     const flush = function* (): Generator<CanonicalEvent> {
       input.onRoute?.(route);
       yield* buffered;
@@ -113,11 +122,16 @@ export async function* streamPoolRequest(input: PoolRequestInput & {
             buffered.length = 0;
           }
         }
+        if (event.type === "usage-updated") {
+          if (event.inputTokens !== undefined) pendingInputTokens = event.inputTokens;
+          if (event.outputTokens !== undefined) pendingOutputTokens = event.outputTokens;
+          continue;
+        }
         if (event.type === "response-completed") terminal = true;
         if (event.type !== "response-failed") continue;
         const outcome = classifyProviderFailure(event.code);
         recordOutcome(input.store, route, outcome, affinity.cooldownSeconds);
-        // A provider-emitted failed event is a deterministic rejection only
+        try { updateAdaptiveHealth(input.store, route.accountId, Date.now() - attemptStart, false); } catch { void 0; }
         // when no acceptance preceded it; after provider acceptance the
         // attempt is committed and must never rotate.
         const failedCommitment: CommitmentState = commitment === "provider-accepted" || commitment === "client-output-started" || commitment === "tool-boundary" ? "provider-accepted" : "not-sent";
@@ -136,6 +150,7 @@ export async function* streamPoolRequest(input: PoolRequestInput & {
         const outcome: RouteOutcomeClass = "transient";
         const truncatedCommitment: CommitmentState = commitment === "provider-accepted" || commitment === "client-output-started" || commitment === "tool-boundary" ? "provider-accepted" : "not-sent";
         recordOutcome(input.store, route, outcome, affinity.cooldownSeconds);
+        try { updateAdaptiveHealth(input.store, route.accountId, Date.now() - attemptStart, false); } catch { void 0; }
         lastError = new RouteFailure(outcome, "incomplete-stream", "Provider stream ended without a terminal response", truncatedCommitment);
         if (canRotate({ outputStarted: route.outputStarted, rotationsUsed, retryBudget, outcome, commitment: truncatedCommitment })) {
           tried.push(route.accountId);
@@ -144,6 +159,31 @@ export async function* streamPoolRequest(input: PoolRequestInput & {
         throw route.outputStarted ? new RouteSealedError() : lastError;
       }
       recordOutcome(input.store, route, "success", affinity.cooldownSeconds);
+      try { updateAdaptiveHealth(input.store, route.accountId, Date.now() - attemptStart, true); } catch { void 0; }
+      try {
+        const hasUsage = pendingInputTokens !== undefined || pendingOutputTokens !== undefined;
+        if (hasUsage) {
+          const policy = input.store.currentPolicy();
+          const providerName = policy?.snapshot.providers.find((item) => item.id === route.providerId)?.name ?? route.providerId;
+          const inputTokens = pendingInputTokens ?? 0;
+          const outputTokens = pendingOutputTokens ?? 0;
+          const cost = estimateCost({ model: route.modelId, inputTokens, outputTokens });
+          if (inputTokens > 0 || outputTokens > 0 || cost > 0) {
+            appendEntrySync(input.store.directory, {
+              eventId: ledgerEventId,
+              provider: providerName,
+              model: route.modelId,
+              inputTokens,
+              outputTokens,
+            });
+          }
+        }
+        const govKeyId = (input.request as unknown as Record<string, unknown>).__governanceKeyId as string | undefined;
+        if (typeof govKeyId === "string" && govKeyId.length > 0) {
+          const cost = estimateCost({ model: route.modelId, inputTokens: pendingInputTokens ?? 0, outputTokens: pendingOutputTokens ?? 0 });
+          if (cost > 0) recordKeyUsage(input.store, govKeyId, cost);
+        }
+      } catch { void 0; }
       yield* flush();
       return;
     } catch (error) {
@@ -154,7 +194,7 @@ export async function* streamPoolRequest(input: PoolRequestInput & {
       if (isAbortError(error)) throw error;
       const outcome = classifyThrown(error);
       recordOutcome(input.store, route, outcome, affinity.cooldownSeconds);
-      // #121: the adapter owns commitment evidence of the failure point;
+      try { updateAdaptiveHealth(input.store, route.accountId, Date.now() - attemptStart, false, new Date(), error); } catch { void 0; }
       // anything without explicit `not-sent` evidence is conservatively
       // `unknown` (no replay).
       const thrownCommitment = commitmentOf(error);
@@ -189,9 +229,11 @@ function recordOutcome(
 ): void {
   const cooldown = outcome === "success" ? null : cooldownUntilFor(outcome, store.currentTime(), cooldownSeconds);
   const current = store.getAccount(route.accountId);
+  const consecutiveFailures = store.getHealth(route.accountId)?.consecutiveFailures ?? 0;
+  const nextFailures = outcome === "success" ? 0 : consecutiveFailures + 1;
   store.recordRouteOutcome(route.accountId, {
     outcome,
-    quotaClass: nextQuotaClass(outcome, current.quotaClass),
+    quotaClass: nextQuotaClass(outcome, current.quotaClass, nextFailures),
     cooldownUntil: cooldown ?? null,
   });
 }

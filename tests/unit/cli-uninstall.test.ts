@@ -142,15 +142,16 @@ describe("rly uninstall CLI (#129)", () => {
     await writeFile(join(home, ".local", "bin", "rly"), "#!/bin/sh\necho foreign\n", { mode: 0o755 });
     const output = vi.fn();
     vi.spyOn(console, "log").mockImplementation(output);
+    const calls = { unregistered: 0, stopped: 0 };
     const code = await runUninstallCommand(
       { configPath: "/work/gateway.config.toml", purge: false, yes: false, home },
-      { createServiceManager: () => fakeManager({ unregistered: 0, stopped: 0 }) },
+      { createServiceManager: () => fakeManager(calls) },
     );
     expect(code).toBe(1);
+    expect(calls.unregistered).toBe(0);
     expect(String(output.mock.calls.at(-1)?.[0])).toContain("foreign");
     const { readFile } = await import("node:fs/promises");
     await expect(readFile(join(home, ".local", "bin", "rly"), "utf8")).resolves.toContain("foreign");
-    // The RLY home was left intact after refusing.
     const { lstat } = await import("node:fs/promises");
     await expect(lstat(join(controlPlane, "bootstrap"))).resolves.toBeDefined();
   });

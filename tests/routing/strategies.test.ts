@@ -262,7 +262,7 @@ describe("pool strategies", () => {
       credentialSnapshots: readySnapshots(store.listAccounts()),
     });
     expect(selected.route.accountPseudonym).toBe("acct-fixture-healthy");
-    expect(selected.trace.candidates.find((item) => item.accountPseudonym === "acct-fixture-exhausted")?.eligible).toBe(true);
+    expect(selected.trace.candidates.find((item) => item.accountPseudonym === "acct-fixture-exhausted")?.eligible).toBe(false);
     store.close();
   });
 });

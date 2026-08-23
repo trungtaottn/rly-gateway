@@ -11,7 +11,7 @@ import { UpdateStateStore } from "../runtime/update/store.js";
 import { createServiceManager } from "../service-manager/index.js";
 import { readInstallation } from "../storage/installation.js";
 import { defaultControlPlaneDirectory, LOG_DIRECTORY, SERVICE_LOG_NAME } from "../storage/paths.js";
-import { SCHEMA_V2_VERSION } from "../storage/schema-v2.js";
+import { SCHEMA_V4_VERSION } from "../storage/schema-v4.js";
 import { readProcessIdentity } from "../runtime/process-identity.js";
 import type { GatewayConfig } from "../config/schema.js";
 import type { GatewayLeaseHandle } from "../runtime/gateway-lifecycle.js";
@@ -286,7 +286,7 @@ export async function runUpdateCommand(
     drainTimeoutMs: options.waitTimeoutMs,
     updateStore,
     cliRuntimeVersion: RUNTIME_VERSION,
-    cliStateVersion: SCHEMA_V2_VERSION,
+    cliStateVersion: SCHEMA_V4_VERSION,
   });
   console.log(JSON.stringify({
     ok: result.outcome !== "failed",
@@ -373,7 +373,7 @@ async function runRemoteAcquisition(
     drainTimeoutMs: options.waitTimeoutMs,
     updateStore: context.updateStore,
     cliRuntimeVersion: RUNTIME_VERSION,
-    cliStateVersion: SCHEMA_V2_VERSION,
+    cliStateVersion: SCHEMA_V4_VERSION,
   });
   console.log(JSON.stringify({
     ok: result.outcome !== "failed",

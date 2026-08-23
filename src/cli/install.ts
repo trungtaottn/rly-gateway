@@ -1,5 +1,5 @@
 import { homedir } from "node:os";
-import { access } from "node:fs/promises";
+import { access, lstat, mkdir, readlink, rename, symlink, unlink } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { stringify } from "smol-toml";
 import { runInit } from "./init.js";
@@ -9,10 +9,9 @@ import { DEFAULT_ORIGIN } from "../installer/metadata.js";
 import { AcquisitionStateStore } from "../installer/state.js";
 import { AcquisitionError, CHANNEL_POLICIES, SUPPORTED_TARGETS, type ChannelPolicy, type ReleaseChannel, type SupportedTarget, type VerifiedCandidate } from "../installer/types.js";
 import { bootstrapScriptPath } from "../runtime/bootstrap.js";
-import { readInstallation } from "../storage/installation.js";
-import { RLY_STATE_DIRECTORY_NAME } from "../storage/paths.js";
+import { readInstallation, resolveControlPlaneDirectory } from "../storage/installation.js";
 import { resolveChannelPolicy } from "./update.js";
-import { isNotFound, readPrivateSymlinkTarget } from "../storage/private-files.js";
+import { isAlreadyExists, isNotFound, readPrivateSymlinkTarget } from "../storage/private-files.js";
 
 /**
  * `rly install` (#129) — the verified first-install / repair/reinstall path.
@@ -43,6 +42,55 @@ async function isReadable(path: string): Promise<boolean> {
   }
 }
 
+function isInvalidArgument(error: unknown): error is NodeJS.ErrnoException {
+  return typeof error === "object" && error !== null && "code" in error && error.code === "EINVAL";
+}
+
+function userLauncherPaths(options: Readonly<{ home: string; controlPlaneDirectory: string }>): Readonly<{ directory: string; linkPath: string; target: string }> {
+  const directory = join(options.home, ".local", "bin");
+  return {
+    directory,
+    linkPath: join(directory, "rly"),
+    target: join(options.controlPlaneDirectory, "bootstrap", "rly-gateway"),
+  };
+}
+
+/**
+ * Readlink of the user launcher. ENOENT (missing) and EINVAL (regular file /
+ * not a symlink) are both "no owned symlink" — callers then lstat to classify
+ * missing vs foreign. Other errors fail closed.
+ */
+async function readLauncherSymlinkTarget(linkPath: string): Promise<string | undefined> {
+  try {
+    return await readlink(linkPath);
+  } catch (error: unknown) {
+    if (isNotFound(error) || isInvalidArgument(error)) return undefined;
+    throw error;
+  }
+}
+
+/**
+ * Read-only probe of the user-facing `~/.local/bin/rly` launcher. Uses
+ * `lstat` before `readlink` so a regular file (readlink → EINVAL) is classified
+ * as foreign without throwing. Missing path ⇒ not foreign and not owned.
+ */
+export async function probeUserLauncherSymlink(
+  options: Readonly<{ home: string; controlPlaneDirectory: string }>,
+): Promise<Readonly<{ path: string; foreign: boolean; owned: boolean }>> {
+  const { linkPath, target } = userLauncherPaths(options);
+  const details = await lstat(linkPath).catch((error: unknown) => {
+    if (isNotFound(error)) return undefined;
+    throw error;
+  });
+  if (details === undefined) return { path: linkPath, foreign: false, owned: false };
+  if (!details.isSymbolicLink()) return { path: linkPath, foreign: true, owned: false };
+  const existing = await readLauncherSymlinkTarget(linkPath);
+  if (existing === undefined) return { path: linkPath, foreign: true, owned: false };
+  const resolved = resolve(linkPath, "..", existing);
+  if (resolved !== target) return { path: linkPath, foreign: true, owned: false };
+  return { path: linkPath, foreign: false, owned: true };
+}
+
 /**
  * Installs the user-facing `~/.local/bin/rly` launcher as a symlink to the
  * stable RLY-owned bootstrap (the ONLY installed execution identity — the
@@ -50,39 +98,38 @@ async function isReadable(path: string): Promise<boolean> {
  * symlink at that path is NEVER overwritten (fails closed with an actionable
  * message). Deterministic per-platform install location: `~/.local/bin` on
  * both macOS and Linux, no sudo.
+ *
+ * Creation is temp-symlink + atomic `rename` (no `O_EXCL` open on the final
+ * path) so concurrent readers never observe a missing intermediate state.
+ * A racing foreign path is detected before rename and by post-rename
+ * readlink proof; it is never overwritten.
  */
 export async function installUserLauncherSymlink(
   options: Readonly<{ home: string; controlPlaneDirectory: string }>,
 ): Promise<Readonly<{ path: string; created: boolean; foreign: boolean }>> {
-  const { mkdir, lstat, readlink, symlink, rename, unlink } = await import("node:fs/promises");
-  const directory = join(options.home, ".local", "bin");
-  await mkdir(directory, { recursive: true, mode: 0o755 }).catch((error: unknown) => {
-    if (isNotFound(error)) throw error;
-  });
-  const linkPath = join(directory, "rly");
-  const target = join(options.controlPlaneDirectory, "bootstrap", "rly-gateway");
-  const existing = await readlink(linkPath).catch((error: unknown) => {
-    if (isNotFound(error)) return undefined;
-    throw error;
-  });
-  if (existing !== undefined) {
-    const resolved = resolve(linkPath, "..", existing);
-    if (resolved !== target) return { path: linkPath, created: false, foreign: true };
-    return { path: linkPath, created: false, foreign: false };
-  }
-  const details = await lstat(linkPath).catch((error: unknown) => {
-    if (isNotFound(error)) return undefined;
-    throw error;
-  });
-  if (details !== undefined) return { path: linkPath, created: false, foreign: true };
-  // Atomic create (temp link + rename) so a concurrent reader never sees a gap.
+  const { directory, linkPath, target } = userLauncherPaths(options);
+  await mkdir(directory, { recursive: true, mode: 0o755 });
+  const probe = await probeUserLauncherSymlink(options);
+  if (probe.foreign) return { path: probe.path, created: false, foreign: true };
+  if (probe.owned) return { path: probe.path, created: false, foreign: false };
   const temporaryPath = join(directory, `.rly.${randomSuffix()}.tmp`);
   await symlink(target, temporaryPath);
   try {
+    const raced = await probeUserLauncherSymlink(options);
+    if (raced.foreign || raced.owned) {
+      await unlink(temporaryPath).catch(() => undefined);
+      return { path: raced.path, created: false, foreign: raced.foreign };
+    }
     await rename(temporaryPath, linkPath);
   } catch (error) {
     await unlink(temporaryPath).catch(() => undefined);
+    if (isAlreadyExists(error)) return { path: linkPath, created: false, foreign: true };
     throw error;
+  }
+  const installed = await readLauncherSymlinkTarget(linkPath);
+  if (installed === undefined || resolve(linkPath, "..", installed) !== target) {
+    await unlink(temporaryPath).catch(() => undefined);
+    return { path: linkPath, created: false, foreign: true };
   }
   return { path: linkPath, created: true, foreign: false };
 }
@@ -209,7 +256,7 @@ export async function resolveInstallContext(
     { channel: options.channel, channelExplicit: options.channelExplicit, home: options.home },
   );
   return {
-    controlPlaneDirectory: join(options.home, RLY_STATE_DIRECTORY_NAME),
+    controlPlaneDirectory: await resolveControlPlaneDirectory(options.home),
     target: targetValue as SupportedTarget,
     policy,
   };
@@ -389,6 +436,14 @@ export async function runInstallCommand(
   const existing = await readInstallation(controlPlaneDirectory);
   const activeTarget = await readPrivateSymlinkTarget(join(controlPlaneDirectory, "runtime", "refs", "active")).catch(() => undefined);
   if (existing === undefined || activeTarget === undefined) {
+    const launcherProbe = await probeUserLauncherSymlink({ home, controlPlaneDirectory });
+    if (launcherProbe.foreign) {
+      console.log(JSON.stringify({
+        ok: false,
+        error: `${launcherProbe.path} is not RLY-owned; refusing to overwrite a foreign path. Add the RLY bootstrap to your PATH manually or resolve the conflict`,
+      }));
+      return 1;
+    }
     const result = await firstInstall({
       home,
       controlPlaneDirectory,

@@ -13,7 +13,8 @@ export { RLY_MODEL_PREFIX } from "../routing/model-projection/types.js";
  *
  * Claude Code's `CLAUDE_CONFIG_DIR` owns settings, agents, skills, commands,
  * plugins, and session/history state for the supported client baseline (pinned
- * through #24; the currently observed target is `2.1.229`). The historical
+ * through #24; supported baseline `claude-code-2.1.229`, observed `2.1.233`
+ * is not promoted). The historical
  * launcher pointed that variable at a fresh throwaway temp directory so RLY
  * never touched the user's real `~/.claude` — but it also threw away the
  * user's settings/agents/plugins and every RLY session/history on exit.
@@ -411,6 +412,14 @@ export type OwnershipManifest = Readonly<{
   entries: Readonly<Record<string, ManifestEntry>>;
 }>;
 
+function explicitPolicyFingerprint(explicit?: ExplicitClaudeSettings): string | undefined {
+  if (explicit === undefined) return undefined;
+  const model = explicit.model ?? "";
+  const envKeys = explicit.env === undefined ? [] : Object.keys(explicit.env).sort();
+  if (model === "" && envKeys.length === 0) return undefined;
+  return createHash("sha256").update(JSON.stringify({ model, envKeys })).digest("hex");
+}
+
 function isAlreadyExists(error: unknown): boolean {
   return typeof error === "object" && error !== null && "code" in error && error.code === "EEXIST";
 }
@@ -543,6 +552,8 @@ type OverlayMarker = Readonly<{
   source?: string;
   lastComposedAt?: string;
   migratedFromShared?: boolean;
+  /** Digest of launch-policy model/env keys; changing policy recomposes even if native is unchanged. */
+  explicitPolicyFingerprint?: string;
 }>;
 
 async function readMarker(path: string): Promise<OverlayMarker | undefined> {
@@ -554,6 +565,7 @@ async function readMarker(path: string): Promise<OverlayMarker | undefined> {
     ...(typeof record["source"] === "string" ? { source: record["source"] } : {}),
     ...(typeof record["lastComposedAt"] === "string" ? { lastComposedAt: record["lastComposedAt"] } : {}),
     ...(typeof record["migratedFromShared"] === "boolean" ? { migratedFromShared: record["migratedFromShared"] } : {}),
+    ...(typeof record["explicitPolicyFingerprint"] === "string" ? { explicitPolicyFingerprint: record["explicitPolicyFingerprint"] } : {}),
   };
 }
 
@@ -777,33 +789,40 @@ export async function prepareClaudeOverlay(
   const nativeSettingsPath = join(source, SETTINGS_FILE);
   const nativeSettings = await readJsonFile(nativeSettingsPath);
   const settingsEntry = manifest?.entries[SETTINGS_FILE];
-  const shouldComposeSettings = nativeSettings !== undefined && (
+  const explicitFingerprint = explicitPolicyFingerprint(options.explicit);
+  const hasExplicitModel = options.explicit?.model !== undefined;
+  const shouldComposeSettings = (nativeSettings !== undefined || hasExplicitModel) && (
     !(await exists(paths.settings))
     || marker === undefined
     || (marker.allowlistVersion ?? 0) < CLAUDE_OVERLAY_ALLOWLIST_VERSION
-    || await needsRefresh(nativeSettingsPath, paths.settings)
+    || (nativeSettings !== undefined && await needsRefresh(nativeSettingsPath, paths.settings))
+    || explicitFingerprint !== marker.explicitPolicyFingerprint
   );
   if (shouldComposeSettings) {
     const previous = await readJsonFile(paths.settings);
-    await writePrivateText(paths.settings, `${JSON.stringify(composeOverlaySettings(nativeSettings, previous, options.explicit), null, 2)}\n`);
+    const composedNative = nativeSettings ?? {};
+    await writePrivateText(paths.settings, `${JSON.stringify(composeOverlaySettings(composedNative, previous, options.explicit), null, 2)}\n`);
     refreshed.push(SETTINGS_FILE);
     composed = true;
-    const nativeEnv = (nativeSettings as Record<string, unknown>)["env"];
+    const nativeRecord = nativeSettings as Record<string, unknown> | undefined;
+    const nativeEnv = nativeRecord === undefined ? undefined : nativeRecord["env"];
     const nativeEnvKeys = typeof nativeEnv === "object" && nativeEnv !== null && !Array.isArray(nativeEnv)
       ? Object.keys(nativeEnv)
       : [];
     // Keys that can actually appear in the composed view (gateway-contract and
     // unsupported shapes are never composed, so they are not reconciliation
     // metadata — keeping the manifest lean and privacy-preserving).
-    const settingsSourceKeys = [
-      ...Object.keys(nativeSettings as Record<string, unknown>).filter(
-        (key) => !(UNSUPPORTED_SETTINGS_KEYS as readonly string[]).includes(key),
-      ),
-      ...nativeEnvKeys
-        .filter((key) => !(GATEWAY_CONTRACT_ENV_KEYS as readonly string[]).includes(key))
-        .map((key) => `env.${key}`),
-    ];
-    const sourceHashValue = await fileHash(nativeSettingsPath);
+    const settingsSourceKeys = nativeRecord === undefined
+      ? []
+      : [
+          ...Object.keys(nativeRecord).filter(
+            (key) => !(UNSUPPORTED_SETTINGS_KEYS as readonly string[]).includes(key),
+          ),
+          ...nativeEnvKeys
+            .filter((key) => !(GATEWAY_CONTRACT_ENV_KEYS as readonly string[]).includes(key))
+            .map((key) => `env.${key}`),
+        ];
+    const sourceHashValue = nativeRecord === undefined ? undefined : await fileHash(nativeSettingsPath);
     const viewHashValue = await fileHash(paths.settings);
     manifestChanged = true;
     manifest = {
@@ -814,8 +833,8 @@ export async function prepareClaudeOverlay(
       entries: {
         ...manifest?.entries,
         [SETTINGS_FILE]: {
-          category: "native-imported",
-          source: SETTINGS_FILE,
+          category: nativeRecord === undefined ? "rly-generated" : "native-imported",
+          ...(nativeRecord === undefined ? {} : { source: SETTINGS_FILE }),
           sourceHash: sourceHashValue,
           viewHash: viewHashValue,
           ...(settingsEntry?.importedAt === undefined ? {} : { importedAt: settingsEntry.importedAt }),
@@ -1084,6 +1103,7 @@ export async function prepareClaudeOverlay(
       source,
       lastComposedAt: reconcileAt,
       ...(migratedFromShared ? { migratedFromShared: true } : {}),
+      ...(explicitFingerprint === undefined ? {} : { explicitPolicyFingerprint: explicitFingerprint }),
     });
   }
   return {

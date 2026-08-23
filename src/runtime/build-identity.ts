@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { z } from "zod";
 import { artifactIdSchema } from "./update/types.js";
 import { RUNTIME_VERSION } from "./gateway-attestation.js";
-import { SCHEMA_V2_VERSION } from "../storage/schema-v2.js";
+import { SCHEMA_V4_VERSION } from "../storage/schema-v4.js";
 
 /**
  * Exact build identity (#94). One versioned identity object is shared by
@@ -33,7 +33,7 @@ export const CONTROL_PROTOCOL_VERSION = 1;
 /** Data-plane wire protocol version (currently unified with control). */
 export const DATA_PROTOCOL_VERSION = 1;
 /** Durable control-plane state/schema version the runtime was built against. */
-export const STATE_SCHEMA_VERSION = SCHEMA_V2_VERSION;
+export const STATE_SCHEMA_VERSION = SCHEMA_V4_VERSION;
 
 export const RELEASE_CHANNELS = ["dev", "beta", "stable"] as const;
 export type ReleaseChannel = (typeof RELEASE_CHANNELS)[number];

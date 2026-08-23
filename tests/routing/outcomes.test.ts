@@ -17,6 +17,11 @@ describe("quota class transitions", () => {
     expect(nextQuotaClass("auth", "healthy")).toBe("healthy");
     expect(nextQuotaClass("transient", "warning")).toBe("warning");
     expect(nextQuotaClass("quota", "exhausted")).toBe("exhausted");
+    expect(nextQuotaClass("transient", "healthy", 2)).toBe("healthy");
+    expect(nextQuotaClass("transient", "healthy", 3)).toBe("warning");
+    expect(nextQuotaClass("transient", "warning", 3)).toBe("unknown");
+    expect(nextQuotaClass("transient", "unknown", 3)).toBe("unknown");
+    expect(nextQuotaClass("transient", "exhausted", 3)).toBe("exhausted");
   });
 });
 
@@ -127,13 +132,13 @@ describe("route outcomes", () => {
     if (!probePolicy) throw new Error("expected policy");
     const probed = probing.listAccounts()[0];
     if (!probed) throw new Error("expected account");
-    const probe = await probeSelector.select({
+    // Exhausted remains ineligible even after cooldown expiry (hard block, probe via manual reset only)
+    await expect(probeSelector.select({
       ...selectInput,
       requestId: "req-probe",
       policy: probePolicy,
       credentialSnapshots: readySnapshots([probed]),
-    });
-    expect(probe.route.accountPseudonym).toBe("acct-fixture-001");
+    })).rejects.toThrow("No eligible account");
     expect(probed.quotaClass).toBe("exhausted");
 
     const failed = probing.recordRouteOutcome(probed.id, {

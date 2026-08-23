@@ -116,7 +116,9 @@ Fresh installations may show an empty model list because unreviewed models are
 classified as experimental. Enable experimental discovery explicitly in the
 gateway configuration or promote models through reviewed compatibility
 evidence. Exact configured model routes continue to work independently of
-picker visibility.
+picker visibility. The OpenRouter physical model
+`deepseek/deepseek-v4-flash-0731` is admitted as EXPERIMENTAL catalog evidence
+with declared context/output limits; it is not a reviewed live-canary path.
 
 ## Common commands
 
@@ -128,6 +130,8 @@ rly status
 rly doctor
 rly quota
 rly route-trace
+rly cost --since 7d --group-by model --json
+rly cost --prune 90d
 
 rly <profile>
 rly run claude --profile <profile> --
@@ -146,6 +150,9 @@ Headless control-plane examples:
 
 ```bash
 rly config providers list
+rly config providers create --name openrouter --mode direct
+rly config accounts create --provider-id <provider-id> --pseudonym acct-1 \
+  --credential-env OPENROUTER_API_KEY
 rly config providers create --name codex --mode oauth
 rly config accounts login --provider-id <provider-id> --pseudonym acct-1
 rly config pools create --name codex-pool --provider-id <provider-id> \
@@ -254,6 +261,5 @@ publication authority.
 
 ## License
 
-RLY Gateway is released under the [MIT License](./LICENSE). Required upstream
-notices and frozen source provenance are retained in
-[THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md) and [`provenance/`](./provenance/).
+RLY Gateway is released under the [MIT License](./LICENSE). Frozen source
+provenance is retained in [`provenance/`](./provenance/).

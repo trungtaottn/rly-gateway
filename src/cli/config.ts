@@ -26,9 +26,10 @@ export type ConfigFocus =
   | Readonly<{ kind: "control-center" }>
   | Readonly<{ kind: "status" }>
   | Readonly<{ kind: "providers"; action: "list" | "create"; fields: Readonly<Record<string, string>> }>
-  | Readonly<{ kind: "accounts"; action: "list" | "login" | "import" | "revoke" | "refresh" | "pause" | "resume"; fields: Readonly<Record<string, string>> }>
+  | Readonly<{ kind: "accounts"; action: "list" | "create" | "login" | "import" | "revoke" | "refresh" | "pause" | "resume"; fields: Readonly<Record<string, string>> }>
   | Readonly<{ kind: "pools"; action: "list" | "create"; fields: Readonly<Record<string, string>> }>
-  | Readonly<{ kind: "profiles"; action: "list" | "create"; fields: Readonly<Record<string, string>> }>;
+  | Readonly<{ kind: "profiles"; action: "list" | "create"; fields: Readonly<Record<string, string>> }>
+  | Readonly<{ kind: "keys"; action: "list" | "create" | "revoke"; fields: Readonly<Record<string, string>> }>;
 
 export type ConfigCommand = Readonly<{
   command: "config";
@@ -37,9 +38,10 @@ export type ConfigCommand = Readonly<{
   focus: ConfigFocus;
 }>;
 
-const CONFIG_RESOURCES = ["providers", "accounts", "pools", "profiles"] as const;
-const ACCOUNT_ACTIONS = ["list", "login", "import", "revoke", "refresh", "pause", "resume"] as const;
+const CONFIG_RESOURCES = ["providers", "accounts", "pools", "profiles", "keys"] as const;
+const ACCOUNT_ACTIONS = ["list", "create", "login", "import", "revoke", "refresh", "pause", "resume"] as const;
 const RESOURCE_ACTIONS = ["list", "create"] as const;
+const KEYS_ACTIONS = ["list", "create", "revoke"] as const;
 
 export function parseConfigArgs(args: readonly string[], cwd: string): ConfigCommand | undefined {
   if (args[0] !== "config") return undefined;
@@ -65,10 +67,10 @@ export function parseConfigArgs(args: readonly string[], cwd: string): ConfigCom
     return { command: "config", configPath, headless, focus: { kind: "status" } };
   }
   if (!(CONFIG_RESOURCES as readonly string[]).includes(domain)) {
-    throw new Error("config requires status, ui, providers, accounts, pools, or profiles");
+    throw new Error("config requires status, ui, providers, accounts, pools, profiles, or keys");
   }
-  const resource = domain as "providers" | "accounts" | "pools" | "profiles";
-  const allowed: readonly string[] = resource === "accounts" ? ACCOUNT_ACTIONS : RESOURCE_ACTIONS;
+  const resource = domain as "providers" | "accounts" | "pools" | "profiles" | "keys";
+  const allowed: readonly string[] = resource === "accounts" ? ACCOUNT_ACTIONS : resource === "keys" ? KEYS_ACTIONS : RESOURCE_ACTIONS;
   const selected = action === undefined ? "list" : action;
   if (!allowed.includes(selected)) {
     throw new Error(`config ${resource} action is not valid for ${resource}`);
@@ -96,6 +98,14 @@ export function parseConfigArgs(args: readonly string[], cwd: string): ConfigCom
       configPath,
       headless,
       focus: { kind: "pools", action: selected as "list" | "create", fields },
+    };
+  }
+  if (resource === "keys") {
+    return {
+      command: "config",
+      configPath,
+      headless,
+      focus: { kind: "keys", action: selected as "list" | "create" | "revoke", fields },
     };
   }
   return {
@@ -128,6 +138,7 @@ type EnsuredRuntime = Readonly<{
 
 const READINESS_POLL_MS = 250;
 const READINESS_TIMEOUT_MS = 15_000;
+const FOREGROUND_SHUTDOWN_TIMEOUT_MS = 5_000;
 
 async function defaultWaitForResident(config: GatewayConfig, timeoutMs = READINESS_TIMEOUT_MS): Promise<RuntimeInspection> {
   const deadline = Date.now() + timeoutMs;
@@ -195,20 +206,51 @@ export async function runConfig(command: ConfigCommand, dependencies: ConfigDepe
   });
   const config = resolved.config;
   const ensured = await ensureManagementRuntime(config, home, dependencies);
-  const token = await (dependencies.readManagementToken ?? readManagementToken)(config);
-  if (!token) {
-    console.log(JSON.stringify({ ok: false, error: "management is not running" }));
-    return 1;
+  // Interactive control-center keeps a session-scoped runtime alive; one-shot
+  // status/focused paths and the token-missing early exit must always release it.
+  let retainForeground = false;
+  try {
+    const token = await (dependencies.readManagementToken ?? readManagementToken)(config);
+    if (!token) {
+      console.log(JSON.stringify({ ok: false, error: "management is not running" }));
+      return 1;
+    }
+    const baseUrl = managementBaseUrl(config);
+    const origin = baseUrl;
+    if (command.focus.kind === "status") {
+      return await runStatusSummary(resolved, ensured, token, baseUrl, origin, dependencies);
+    }
+    if (command.focus.kind === "control-center") {
+      const code = await runControlCenter(resolved, ensured, token, baseUrl, origin, command.headless, dependencies);
+      retainForeground = true;
+      return code;
+    }
+    return await runFocused(command.focus, token, baseUrl, origin, dependencies);
+  } finally {
+    if (!retainForeground && ensured.foreground !== undefined) {
+      await shutdownForegroundBounded(ensured.foreground);
+    }
   }
-  const baseUrl = managementBaseUrl(config);
-  const origin = baseUrl;
-  if (command.focus.kind === "status") {
-    return runStatusSummary(resolved, ensured, token, baseUrl, origin, dependencies);
+}
+
+async function shutdownForegroundBounded(
+  foreground: ResidentRuntimeHandle,
+  timeoutMs = FOREGROUND_SHUTDOWN_TIMEOUT_MS,
+): Promise<void> {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    await Promise.race([
+      foreground.shutdown(),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          reject(new Error("session-scoped foreground runtime did not shut down within the bounded window"));
+        }, timeoutMs);
+        timer.unref();
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
   }
-  if (command.focus.kind === "control-center") {
-    return runControlCenter(resolved, ensured, token, baseUrl, origin, command.headless, dependencies);
-  }
-  return runFocused(command.focus, token, baseUrl, origin, dependencies);
 }
 
 function runtimeSummary(ensured: EnsuredRuntime): Readonly<Record<string, unknown>> {
@@ -312,7 +354,7 @@ async function runControlCenter(
 }
 
 async function runFocused(
-  focus: Extract<ConfigFocus, { kind: "providers" | "accounts" | "pools" | "profiles" }>,
+  focus: Extract<ConfigFocus, { kind: "providers" | "accounts" | "pools" | "profiles" | "keys" }>,
   token: string,
   baseUrl: string,
   origin: string,
@@ -338,8 +380,22 @@ async function runFocused(
     }
     return requestOk(request, baseUrl, token, origin, "GET", "/v1/profiles");
   }
+  if (focus.kind === "keys") {
+    if (focus.action === "create") {
+      return requestOk(request, baseUrl, token, origin, "POST", "/v1/keys", fields);
+    }
+    if (focus.action === "list") {
+      return requestOk(request, baseUrl, token, origin, "GET", "/v1/keys");
+    }
+    const keyId = fields["id"];
+    if (keyId === undefined) throw new Error("keys revoke requires --id");
+    return requestOk(request, baseUrl, token, origin, "POST", `/v1/keys/${keyId}/revoke`);
+  }
   if (focus.action === "list") {
     return requestOk(request, baseUrl, token, origin, "GET", "/v1/accounts");
+  }
+  if (focus.action === "create") {
+    return requestOk(request, baseUrl, token, origin, "POST", "/v1/accounts", accountCreateBody(fields));
   }
   if (focus.action === "login") {
     const started = await request(baseUrl, token, origin, "POST", "/v1/credentials/login", accountLoginBody(fields));
@@ -401,7 +457,7 @@ function poolCreateBody(fields: Readonly<Record<string, string>>): Readonly<Reco
     body["accountIds"] = fields["accounts"].split(",").filter(Boolean);
   }
   if (body["name"] === undefined || body["providerId"] === undefined || body["strategy"] === undefined) {
-    throw new Error("pools create requires --name, --provider-id, and --strategy (manual|round-robin|fill-first)");
+    throw new Error("pools create requires --name, --provider-id, and --strategy (manual|round-robin|fill-first|adaptive)");
   }
   return body;
 }
@@ -417,6 +473,19 @@ function profileCreateBody(fields: Readonly<Record<string, string>>): Readonly<R
     throw new Error("profiles create requires --name, --harness (claude|codex), and --roles <json>");
   }
   return body;
+}
+
+function accountCreateBody(fields: Readonly<Record<string, string>>): Readonly<Record<string, unknown>> {
+  const providerId = fields["provider-id"];
+  const pseudonym = fields["pseudonym"];
+  const environmentName = fields["credential-env"];
+  if (providerId === undefined || pseudonym === undefined || environmentName === undefined) {
+    throw new Error("accounts create requires --provider-id, --pseudonym, and --credential-env");
+  }
+  if (!/^[A-Z][A-Z0-9_]{2,127}$/.test(environmentName)) {
+    throw new Error("--credential-env must be an environment variable name");
+  }
+  return { providerId, pseudonym, credentialRef: `env:${environmentName}` };
 }
 
 function accountLoginBody(fields: Readonly<Record<string, string>>): Readonly<Record<string, unknown>> {

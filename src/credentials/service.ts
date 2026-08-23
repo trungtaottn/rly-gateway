@@ -7,6 +7,7 @@ import { providerContract, type CredentialProviderName } from "../providers/cata
 import { CredentialUnreadyError, isCredentialError, OAuthFlowError } from "./errors.js";
 import type { CredentialBroker } from "./broker.js";
 import type { CredentialMetadata } from "./record.js";
+import { assertProviderCredential, parseCredentialRef } from "./credential-ref.js";
 
 export type AccountReadiness = "ready" | "unready" | "expired" | "paused" | "revoked";
 
@@ -17,6 +18,7 @@ export class CredentialService {
   public constructor(
     private readonly store: ControlPlaneStore,
     private readonly broker: CredentialBroker,
+    private readonly environment: NodeJS.ProcessEnv = process.env,
   ) {}
 
   public async previewImport(sourcePath: string, providerId?: string): Promise<unknown> {
@@ -40,6 +42,36 @@ export class CredentialService {
       ? await this.broker.importCline(source)
       : await this.broker.importCodex(source);
     return this.attachOrRevoke(input.providerId, input.pseudonym, metadata, actor);
+  }
+
+  /** Stores an approved environment-variable reference, never its value. */
+  public createDirectEnvironmentAccount(input: Readonly<{
+    providerId: string;
+    pseudonym: string;
+    credentialRef: string;
+  }>, actor: ManagementActor): AccountRecord {
+    const provider = this.store.listProviders().find((item) => item.id === input.providerId);
+    if (!provider || provider.integrationMode !== "direct") {
+      throw new ValidationError("environment credential accounts require a direct provider");
+    }
+    const ref = this.parseEnvCredentialRef(input.credentialRef);
+    try {
+      assertProviderCredential(provider.name, ref);
+    } catch {
+      throw new ValidationError("credential reference is not approved for the selected provider");
+    }
+    const handle = `env:${ref.name}`;
+    const created = this.store.createAccount({
+      pseudonym: input.pseudonym,
+      providerId: provider.id,
+      credentialHandle: handle,
+      state: "unready",
+    }, actor);
+    return this.store.bindCredential(created.id, created.version, {
+      credentialHandle: handle,
+      credentialGeneration: 1,
+      state: "ready",
+    }, actor);
   }
 
   public async startLogin(input: Readonly<{ providerId: string; pseudonym: string }>, actor: ManagementActor): Promise<Readonly<{
@@ -135,9 +167,18 @@ export class CredentialService {
     }
   }
 
-  public async readiness(account: AccountRecord): Promise<AccountReadiness> {
+  public async readiness(account: AccountRecord, environment: NodeJS.ProcessEnv = this.environment): Promise<AccountReadiness> {
     if (account.state === "paused") return "paused";
     if (account.state === "revoked") return "revoked";
+    if (account.credentialHandle.startsWith("env:")) {
+      const name = account.credentialHandle.slice(4);
+      if (!environment[name]) return "unready";
+      const provider = this.store.listProviders().find((item) => item.id === account.providerId);
+      if (provider?.requiredTermsRevision && provider.requiredTermsRevision !== account.termsAcknowledgedRevision) {
+        return "unready";
+      }
+      return account.credentialGeneration >= 1 && account.state === "ready" ? "ready" : "unready";
+    }
     const metadata = await this.broker.metadata(account.credentialHandle);
     if (!metadata || metadata.generation < 1) return "unready";
     if (metadata.expiresAt && Date.parse(metadata.expiresAt) <= Date.now()) return "expired";
@@ -167,6 +208,17 @@ export class CredentialService {
     } catch (error) {
       await this.broker.revoke(metadata.handle).catch(() => undefined);
       throw error;
+    }
+  }
+
+  private parseEnvCredentialRef(value: string): Extract<ReturnType<typeof parseCredentialRef>, { kind: "env" }> {
+    try {
+      const ref = parseCredentialRef(value);
+      if (ref.kind !== "env") throw new ValidationError("direct account credentials must reference an environment variable");
+      return ref;
+    } catch (error) {
+      if (error instanceof ValidationError) throw error;
+      throw new ValidationError("direct account credentials must reference an approved environment variable");
     }
   }
 
