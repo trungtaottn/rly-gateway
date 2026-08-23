@@ -12,6 +12,10 @@ STATUS_BACKLOG="${STATUS_BACKLOG:-ebc073f7}"
 STATUS_TODO="${STATUS_TODO:-f75ad846}"
 STATUS_IN_PROGRESS="${STATUS_IN_PROGRESS:-47fc9ee4}"
 STATUS_DONE="${STATUS_DONE:-98236657}"
+HORIZON_FIELD_ID="${HORIZON_FIELD_ID:-PVTSSF_lAHOCNDwxM4BgUfNzhgIcR8}"
+HORIZON_NOW="${HORIZON_NOW:-48336d4a}"
+HORIZON_NEXT="${HORIZON_NEXT:-0d86404c}"
+HORIZON_LATER="${HORIZON_LATER:-5336239f}"
 
 url="${1:-}"
 if [[ -z "$url" ]]; then
@@ -44,4 +48,14 @@ gh project item-edit \
   --field-id "$STATUS_FIELD_ID" \
   --single-select-option-id "$status" >/dev/null
 
-echo "synced $url -> $item_id"
+# Horizon from labels: horizon:now / horizon:next / horizon:later / horizon:icebox
+horizon_opt=""
+if [[ ",$labels," == *",horizon:now,"* ]]; then horizon_opt="$HORIZON_NOW"
+elif [[ ",$labels," == *",horizon:next,"* ]]; then horizon_opt="$HORIZON_NEXT"
+elif [[ ",$labels," == *",horizon:later,"* ]]; then horizon_opt="$HORIZON_LATER"
+fi
+if [[ -n "$horizon_opt" ]]; then
+  gh project item-edit --project-id "$PROJECT_ID" --id "$item_id" --field-id "$HORIZON_FIELD_ID" --single-select-option-id "$horizon_opt" >/dev/null || true
+fi
+
+echo "synced $url -> $item_id (status $status${horizon_opt:+ horizon $horizon_opt})"
