@@ -1,0 +1,178 @@
+name: Issue Triage
+
+on:
+  issues:
+    types: [opened, reopened, edited, labeled, unlabeled]
+  issue_comment:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: Issue number to triage
+        required: false
+        type: number
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+
+jobs:
+  triage:
+    if: github.event_name == 'issues' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Classify and label
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issue = context.payload.issue || await github.rest.issues.get({
+              owner: context.repo.owner, repo: context.repo.repo,
+              issue_number: context.payload.inputs?.issue_number || context.payload.issue.number
+            }).then(r=>r.data);
+            const n = issue.number;
+            const title = issue.title || "";
+            const body = issue.body || "";
+            const labels = new Set(issue.labels.map(l=>l.name));
+            const add = new Set();
+            const remove = new Set();
+            const comments = [];
+
+            // 1) Title convention -> ensure bug/enhancement
+            const isBugTitle = /^\[Bug\]/i.test(title);
+            const isFeatTitle = /^\[Feature\]/i.test(title);
+            if (isBugTitle && !labels.has("bug")) add.add("bug");
+            if (isFeatTitle && !labels.has("enhancement") && !labels.has("feature")) add.add("enhancement");
+
+            // 2) Default priority if none
+            const hasPriority = [...labels].some(l=>l.startsWith("priority:"));
+            if (!hasPriority) {
+              if (labels.has("bug") || isBugTitle) add.add("priority:medium");
+              else if (labels.has("enhancement") || isFeatTitle) add.add("priority:medium");
+            }
+
+            // 3) Horizon default: if none, set horizon:now for bug, horizon:next for feature
+            const hasHorizon = [...labels].some(l=>l.startsWith("horizon:"));
+            if (!hasHorizon) {
+              if (labels.has("bug") || isBugTitle) add.add("horizon:now");
+              else if (labels.has("enhancement") || isFeatTitle) add.add("horizon:next");
+              else add.add("horizon:now");
+            }
+
+            // 4) Pillar guess from title/body keywords
+            const text = (title + " " + body).toLowerCase();
+            const pillarMap = [
+              ["pillar:ui", ["config ui","management ui","client.ts","page.ts","ritual","roadmap"]],
+              ["pillar:governance", ["governance","rly_","key","budget","rpm"]],
+              ["pillar:observability", ["ledger","trace","pool-health","cost","v1/ledger"]],
+              ["pillar:routing", ["pool","ewma","affinity","selector","adaptive"]],
+              ["pillar:protocol", ["protocol","anthropic","openai","streaming","tools","reasoning"]],
+            ];
+            const hasPillar = [...labels].some(l=>l.startsWith("pillar:"));
+            if (!hasPillar) {
+              for (const [pl, kws] of pillarMap) if (kws.some(k=>text.includes(k))) { add.add(pl); break; }
+            }
+
+            // 5) Privacy scan (secret-like): Bearer, sk-, rly_ reveal
+            const secretRe = /(Bearer\s+[A-Za-z0-9\-_]{20,}|sk-[A-Za-z0-9]{20,}|rly_[A-Za-z0-9]{20,})/;
+            if (secretRe.test(body) || secretRe.test(title)) {
+              comments.push("⚠️ Phát hiện chuỗi giống secret/token trong issue. Vui lòng xoá ngay (Bearer/sk-/rly_) và chỉ để `env:NAME`. Đã gắn `security` + `invalid`.");
+              add.add("security");
+              add.add("invalid");
+            }
+
+            // 6) Invalid if template not followed: [Bug]/[Feature] prefix required
+            if (!isBugTitle && !isFeatTitle && !labels.has("invalid") && !labels.has("question")) {
+              // Don't auto-invalidate if already has bug/enhancement via template labels
+              if (!labels.has("bug") && !labels.has("enhancement") && !labels.has("feature")) {
+                comments.push("Tiêu đề cần prefix `[Bug]:` hoặc `[Feature]:` theo template. Đã gắn `invalid` — sửa tiêu đề để workflow tự gỡ.");
+                add.add("invalid");
+              }
+            } else if ((isBugTitle || isFeatTitle) && labels.has("invalid")) {
+              // Title fixed -> remove invalid
+              remove.add("invalid");
+            }
+
+            // Apply
+            if (add.size) {
+              await github.rest.issues.addLabels({ owner: context.repo.owner, repo: context.repo.repo, issue_number: n, labels: [...add] });
+            }
+            for (const lab of remove) {
+              try { await github.rest.issues.removeLabel({ owner: context.repo.owner, repo: context.repo.repo, issue_number: n, name: lab }); } catch(e) {}
+            }
+            if (comments.length) {
+              await github.rest.issues.createComment({ owner: context.repo.owner, repo: context.repo.repo, issue_number: n, body: comments.join("\n\n") });
+            }
+            // 7) Auto-close invalid after 7d is handled by stale job below; here just label
+
+  commands:
+    if: github.event_name == 'issue_comment'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const body = (context.payload.comment.body || "").trim();
+            const issue = context.payload.issue;
+            if (!issue) return;
+            const n = issue.number;
+            const isCollab = ["OWNER","MEMBER","COLLABORATOR"].includes(context.payload.comment.author_association);
+            const say = async (msg) => github.rest.issues.createComment({ owner: context.repo.owner, repo: context.repo.repo, issue_number: n, body: msg });
+
+            // /label add|remove
+            let m;
+            if (m = body.match(/^\/label\s+(add\s+)?(.+)/i)) {
+              if (!isCollab) return say("`/` commands cần quyền collaborator.");
+              const labs = m[2].split(/[,\s]+/).filter(Boolean);
+              if (labs.length) await github.rest.issues.addLabels({ owner: context.repo.owner, repo: context.repo.repo, issue_number: n, labels: labs });
+              return say(`Đã thêm: \`${labs.join("`, `")}\``);
+            }
+            if (m = body.match(/^\/unlabel\s+(.+)/i)) {
+              if (!isCollab) return say("`/` commands cần quyền collaborator.");
+              const labs = m[1].split(/[,\s]+/).filter(Boolean);
+              for (const lab of labs) try { await github.rest.issues.removeLabel({ owner: context.repo.owner, repo: context.repo.repo, issue_number: n, name: lab }); } catch(e) {}
+              return say(`Đã gỡ: \`${labs.join("`, `")}\``);
+            }
+            if (m = body.match(/^\/horizon\s+(now|next|later|icebox)/i)) {
+              if (!isCollab) return say("`/` commands cần quyền collaborator.");
+              const want = `horizon:${m[1].toLowerCase()}`;
+              const labels = issue.labels.map(l=>l.name);
+              for (const l of labels.filter(l=>l.startsWith("horizon:"))) try { await github.rest.issues.removeLabel({ owner: context.repo.owner, repo: context.repo.repo, issue_number: n, name: l }); } catch(e) {}
+              await github.rest.issues.addLabels({ owner: context.repo.owner, repo: context.repo.repo, issue_number: n, labels: [want] });
+              return say(`Đã chuyển \`Horizon\` → \`${want}\` (Project 4 sync sẽ theo label này).`);
+            }
+            if (/^\/close/i.test(body)) {
+              if (!isCollab) return say("Chỉ collaborator mới `/close`.");
+              await github.rest.issues.update({ owner: context.repo.owner, repo: context.repo.repo, issue_number: n, state: "closed" });
+              const reason = (body.match(/^\/close\s+(.+)/i)?.[1] || "").trim();
+              return say(`Đã close${reason?` — ${reason}`:""}. Dùng \`/reopen\` để mở lại.`);
+            }
+            if (/^\/reopen/i.test(body)) {
+              if (!isCollab) return say("Chỉ collaborator mới `/reopen`.");
+              await github.rest.issues.update({ owner: context.repo.owner, repo: context.repo.repo, issue_number: n, state: "open" });
+              return say("Đã reopen.");
+            }
+            if (/^\/triage/i.test(body)) {
+              // Re-run triage by re-adding a marker label
+              await github.rest.issues.addLabels({ owner: context.repo.owner, repo: context.repo.repo, issue_number: n, labels: ["triage"] });
+              setTimeout(async ()=>{ try{ await github.rest.issues.removeLabel({ owner: context.repo.owner, repo: context.repo.repo, issue_number: n, name: "triage" }); }catch(e){} }, 1000);
+              return say("Đã re-triage (check Horizon/Priority/Pillar).");
+            }
+
+  stale:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'issues'
+    steps:
+      - uses: actions/stale@v9
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          days-before-stale: 14
+          days-before-close: 7
+          stale-issue-label: "stale"
+          stale-issue-message: >
+            Issue này 14 ngày không hoạt động — sẽ auto-close sau 7 ngày nếu không có cập nhật.
+            Gắn `horizon:now` hoặc comment để giữ lại.
+          close-issue-message: >
+            Auto-close do stale 21 ngày. Mở lại bằng `/reopen` hoặc comment.
+          exempt-issue-labels: "horizon:now,priority:high,security"
+          days-before-pr-close: -1
