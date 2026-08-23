@@ -18,7 +18,10 @@ if [[ -z "$url" ]]; then
   echo "usage: $0 <issue-url>" >&2
   exit 2
 fi
-if [[ "$url" != "https://github.com/${OWNER}/${REPOSITORY}/issues/"* ]]; then
+# Case-insensitive: repo moved to lowercase rly-gateway
+_low_url="$(tr '[:upper:]' '[:lower:]' <<<"$url")"
+_low_prefix="$(tr '[:upper:]' '[:lower:]' <<<"https://github.com/${OWNER}/${REPOSITORY}/issues/")"
+if [[ "$_low_url" != "$_low_prefix"* ]]; then
   echo "refusing non-issue URL: $url" >&2
   exit 2
 fi
