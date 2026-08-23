@@ -5,12 +5,15 @@ on:
     types: [opened, reopened, edited, labeled, unlabeled]
   issue_comment:
     types: [created]
+  schedule:
+    - cron: "0 2 * * *"
   workflow_dispatch:
     inputs:
       issue_number:
         description: Issue number to triage
         required: false
         type: number
+
 
 permissions:
   contents: read

@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Ultra — ROADMAP Stability (BSC A + ADV D)</title>
+<style>
+:root{--bg:#14181f;--surface:#1c222c;--elevated:#242c38;--line:#5b6778;--text:#f2f4f7;--muted:#b7c0cc;--accent:#3dd68c;--accent-ink:#0d1a14;--warn:#e3b341;--danger:#ff6b6b;--focus:#7eb6ff;--radius:14px;--max:1200px;--font-ui:ui-sans-serif,system-ui;--font-mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;color-scheme:dark}
+*{box-sizing:border-box}html,body{margin:0;background:var(--bg);color:var(--text);font:16px/1.6 var(--font-ui)}
+a{color:var(--focus)} :focus-visible{outline:3px solid var(--focus);outline-offset:2px}
+.wrap{max-width:var(--max);margin:0 auto;padding:24px 16px 48px}
+.hero{border:1px solid var(--line);border-radius:14px;background:linear-gradient(180deg,var(--surface),var(--bg));padding:32px;display:grid;gap:16px}
+.hero h1{margin:0;font-size:clamp(26px,4vw,42px);line-height:1.05;letter-spacing:-.03em}
+.hero h1 span{color:var(--accent)}
+.kicker{font-size:11px;letter-spacing:.13em;text-transform:uppercase;color:var(--muted)}
+.meta{display:flex;flex-wrap:wrap;gap:8px;font-size:13px;color:var(--muted)}
+.meta span{border:1px solid var(--line);border-radius:999px;padding:5px 11px;background:var(--elevated)}
+.card{border:1px solid var(--line);border-radius:14px;background:var(--surface);padding:24px}
+.grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:16px} @media(max-width:1020px){.grid4{grid-template-columns:1fr 1fr}} @media(max-width:640px){.grid4{grid-template-columns:1fr}}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px} @media(max-width:860px){.grid2{grid-template-columns:1fr}}
+.h2{font-size:20px;letter-spacing:-.02em;margin:48px 0 12px}
+.h3{font-size:13px;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);margin:24px 0 12px}
+.badge{display:inline-flex;gap:6px;align-items:center;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:4px 10px;background:var(--elevated)}
+.badge i{width:8px;height:8px;border-radius:50%;display:inline-block}
+.badge.ok i{background:var(--accent)} .badge.warn i{background:var(--warn)} .badge.bad i{background:var(--danger)}
+table{width:100%;border-collapse:collapse;font-size:13px} th,td{padding:10px 12px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+th{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+td.mono{font-family:var(--font-mono);font-size:12px}
+.pipeline{border:1px solid var(--line);border-radius:14px;background:var(--surface);padding:20px;overflow:auto}
+.pipeline svg{width:100%;min-width:860px;height:160px;display:block}
+.callout{border-left:3px solid var(--accent);padding:10px 14px;background:color-mix(in srgb,var(--accent) 8%, var(--surface));border-radius:0 10px 10px 0;color:var(--muted);font-size:13px}
+.muted{color:var(--muted)} .pill{font-size:10px;letter-spacing:.08em;text-transform:uppercase;border:1px solid var(--line);padding:2px 7px;border-radius:999px;color:var(--muted)}
+.q{border:1px solid var(--line);border-radius:14px;background:var(--surface);padding:20px}
+.q.winner{border-color:var(--accent);box-shadow:0 0 0 1px color-mix(in srgb,var(--accent) 36%, transparent)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="hero">
+    <div class="kicker">ak:brainstorm --ultra + ak:advise --ultra + ak:research ×4 · 260823</div>
+    <h1>ROADMAP <span>ổn định</span> — chốt đôi: BSC <b>A</b> + ADV <b>D</b></h1>
+    <p class="muted" style="max-width:76ch">Bạn giao 3 trách nhiệm cùng lúc — brainstorm/advise/research — ultra đã chạy 10 candidates (5+5) + 4 scouts + 2 verifiers. Kết luận không phải chọn 1: <b style="color:var(--text)">BSC winner A (automation-first: scheduled reconcile + ritual-gate, 69/80) </b> và <b style="color:var(--text)">ADV winner D (workflow hardening first trên origin/dev, 71/80)</b> là 2 mặt cùng 1 tuần 0 — thiếu D thì A không có gì để reconcile, thiếu A thì D không có scheduler giữ Horizon.</p>
+    <div class="meta">
+      <span>BSC: A 69 > E 68 > B 66 > D 62 > C 61</span>
+      <span>ADV: D 71 > E 70 > A 63 > C 61 > B 58</span>
+      <span>Research: 18 open 0 horizon, Project 4 private 106, docs/ gitignored, stale no cron</span>
+      <span>Branch: chore/branching-workflow-doc 6 ahead origin/dev → cần land origin/dev trước</span>
+    </div>
+  </div>
+
+  <h2 class="h2">1 — Vì sao chưa ổn định (research gộp)</h2>
+  <div class="grid4">
+    <div class="card"><div class="badge bad"><i></i> Workflow assurance 6.5/10</div><p>7 gaps: branch protection chưa codify, no CODEOWNERS, release bypass verify, ci @v4 floating vs release pinned, horizon icebox chưa sync, stale chỉ on:issues (no schedule), no PR secret scan.</p></div>
+    <div class="card"><div class="badge bad"><i></i> Project durability</div><p>ROADMAP↔Project↔RITUAL 3 layer nhưng sync chỉ Status+Horizon. Private user project, 4+1 field drift, views thủ công, IDs hardcode, gitignored ritual.</p></div>
+    <div class="card"><div class="badge warn"><i></i> Gate</div><p>RITUAL có nhưng PR template thiếu ritual block, không có ritual-gate job, briefs gitignored nên CI không verify. Solo tự stamp <code>ritual:gate-passed</code>.</p></div>
+    <div class="card"><div class="badge warn"><i></i> Roadmap pattern</div><p>Langfuse/LiteLLM bền nhờ cadence + owner + thin contract + exit criteria, không nhờ Gantt. RLY đã có thin ROADMAP nhưng thiếu owner/review date + stale bot.</p></div>
+  </div>
+
+  <h2 class="h2">2 — Ultra ranking (worst-case)</h2>
+  <div class="grid2">
+    <div class="card">
+      <div class="badge ok"><i></i> BSC — Brainstorm stability</div>
+      <table>
+        <thead><tr><th>#</th><th>Shape</th><th>Tổng</th></tr></thead>
+        <tbody>
+          <tr><td><b>1 A</b></td><td>Automation-first: scheduled reconcile + ritual-gate</td><td><b>69</b></td></tr>
+          <tr><td>2 E</td><td>Observability dashboard nightly .github/health</td><td>68</td></tr>
+          <tr><td>3 B</td><td>Ritual-as-code PR template + check-ritual.sh</td><td>66</td></tr>
+          <tr><td>4 D</td><td>Single-source Project (xoá ROADMAP)</td><td>62</td></tr>
+          <tr><td>5 C</td><td>Cadence-first calendar</td><td>61</td></tr>
+        </tbody>
+      </table>
+      <p class="muted" style="font-size:12px">A thắng vì chỉ A sửa 18/0 và fail-closed empty Now — E chỉ báo đỏ, B không backfill hôm qua, D mất blame history, C miss meeting = fiction.</p>
+    </div>
+    <div class="card">
+      <div class="badge ok"><i></i> ADV — Advise stability</div>
+      <table>
+        <thead><tr><th>#</th><th>Shape</th><th>Tổng</th></tr></thead>
+        <tbody>
+          <tr><td><b>1 D</b></td><td>Workflow hardening first on origin/dev</td><td><b>71</b></td></tr>
+          <tr><td>2 E</td><td>Minimal viable checkbox + pinned weekly</td><td>70</td></tr>
+          <tr><td>3 A</td><td>Mechanical gate required-ci + check-ritual</td><td>63</td></tr>
+          <tr><td>4 C</td><td>Public board generated ROADMAP</td><td>61</td></tr>
+          <tr><td>5 B</td><td>Calendar ritual T3/T4</td><td>58</td></tr>
+        </tbody>
+      </table>
+      <p class="muted" style="font-size:12px">D thắng vì ROADMAP/RITUAL/triage còn trên branch 6-ahead — GitHub không chạy fiction. E runner-up là slice 2 ngày publish + nudge, tự nhận không hold.</p>
+    </div>
+  </div>
+  <div class="callout" style="margin-top:16px"><b>Tổng hợp verifiers:</b> A-self-stamp + A-day-one-red + E-theater là high risks chung — solo 0 reviews tự stamp <code>ritual:gate-passed</code>, 18/0 vừa land weekly đã đỏ, dashboard xanh CI 93% che Horizon 0/18 nếu không gắn fail-closed.</div>
+
+  <h2 class="h2">3 — Khuyến nghị chốt đôi (không chọn 1)</h2>
+  <div class="card" style="border-color:var(--accent)">
+    <h3 style="color:var(--accent);margin:0 0 8px">Tuần 0 = ADV D + BSC A (song song, 1 PR workflow + 1 backfill)</h3>
+    <ol style="margin:0;padding-left:20px;font-size:14px;line-height:1.7">
+      <li><b>Backfill 18 issues</b> — mỗi open đúng 1 <code>horizon:*</code> (bugs→now, backlog BL-*→later, còn lại next) trước khi stale cron live — nếu không 14d sau stale close hàng loạt.</li>
+      <li><b>Workflow PR (origin/dev):</b> <code>issue-triage.yml</code> thêm <code>schedule: cron 0 2 * * *</code> cho stale + PR secret scan job vào <code>required-ci</code> + <code>sync-project-board.sh</code> map <code>horizon:icebox</code> fail-closed (bỏ <code>|| true</code>) + YAML contract test cho triage/stale/horizon + fail khi <code>PROJECT_TOKEN</code> thiếu.</li>
+      <li><b>Ritual gate path-filtered:</b> job <code>check-ritual</code> — nếu PR touches <code>src/management/**</code> hoặc <code>src/control-plane/**</code> thì body phải chứa <code>plans/reports/brainstorm-</code> hoặc <code>Ritual: n/a</code>; thêm vào <code>required-ci</code>. PR template thêm 2 bullets ritual (brief link + Horizon/Pillar).</li>
+      <li><b>Weekly empty-Now check:</b> cron thứ 2 fail nếu <code>horizon:now</code> open = 0 hoặc >1 (WIP=1) — dispatch backfill trước khi bật fail-closed.</li>
+      <li>Chỉ sau đó: <b>thin ROADMAP.md</b> đã tạo (791edb9) land lên <code>origin/dev</code> — nếu không weekly parser chưa có gì để parse.</li>
+    </ol>
+    <p class="muted" style="font-size:12px">B/C/E giữ làm tuần 1-2 nudge: BSC C calendar + E dashboard + B PR template reminder — không thay A/D.</p>
+  </div>
+
+  <h3 class="h3">Delivery flow — tuần 0</h3>
+  <div class="pipeline" role="img" aria-label="backfill -> workflow PR -> empty-Now check">
+    <svg viewBox="0 0 900 140" xmlns="http://www.w3.org/2000/svg">
+      <rect x="8" y="8" width="884" height="124" rx="14" fill="#1c222c" stroke="#5b6778"/>
+      <text x="22" y="26" fill="#b7c0cc" font-size="11" letter-spacing:.09em">WEEK 0 — STABILIZE ORIGIN/DEV BEFORE POLISH</text>
+      <g font-family="ui-sans-serif,system-ui" font-size="12">
+        <rect x="22" y="44" width="180" height="64" rx="11" fill="#3dd68c" stroke="#3dd68c"/><text x="112" y="66" text-anchor="middle" fill="#0d1a14" font-weight="700">1 Backfill 18</text><text x="112" y="82" text-anchor="middle" fill="#0d1a14" font-size="10">one horizon per issue</text>
+        <text x="212" y="76" fill="#5b6778">→</text>
+        <rect x="222" y="44" width="200" height="64" rx="11" fill="#242c38" stroke="#7eb6ff"/><text x="322" y="66" text-anchor="middle" fill="#f2f4f7" font-weight="600">2 Workflow PR</text><text x="322" y="82" text-anchor="middle" fill="#b7c0cc" font-size="10">stale cron + PR secret + icebox</text>
+        <text x="432" y="76" fill="#5b6778">→</text>
+        <rect x="442" y="44" width="200" height="64" rx="11" fill="#242c38" stroke="#e3b341"/><text x="542" y="66" text-anchor="middle" fill="#f2f4f7" font-weight="600">3 Ritual-gate</text><text x="542" y="82" text-anchor="middle" fill="#b7c0cc" font-size="10">path-filter + required-ci</text>
+        <text x="652" y="76" fill="#5b6778">→</text>
+        <rect x="662" y="44" width="220" height="64" rx="11" fill="#1c222c" stroke="#5b6778" stroke-dasharray="6 6"/><text x="772" y="66" text-anchor="middle" fill="#f2f4f7" font-weight="600">4 Weekly empty-Now</text><text x="772" y="82" text-anchor="middle" fill="#b7c0cc" font-size="10">fail-closed after backfill</text>
+      </g>
+    </svg>
+  </div>
+
+  <h2 class="h2">4 — Checklist 30 ngày + metrics</h2>
+  <div class="grid2">
+    <div class="card">
+      <h3>Checklist</h3>
+      <ul style="font-size:13px;line-height:1.7">
+        <li><input type="checkbox" disabled> 18 open đúng 1 <code>horizon:*</code> trước stale cron</li>
+        <li><input type="checkbox" disabled> <code>issue-triage.yml</code> có <code>schedule</code> + PR secret job trong <code>required-ci</code></li>
+        <li><input type="checkbox" disabled> Horizon sync fail-closed, icebox mapped, contract test xanh</li>
+        <li><input type="checkbox" disabled> <code>check-ritual</code> path-filtered + PR template 2 bullets + Horizon/Pillar</li>
+        <li><input type="checkbox" disabled> Weekly empty-Now cron (backfill dispatch trước)</li>
+        <li><input type="checkbox" disabled> <code>ROADMAP.md</code> + <code>docs/RITUAL.md</code> trên <code>origin/dev</code></li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Metrics (verifiable)</h3>
+      <ul style="font-size:13px;line-height:1.7">
+        <li><code>required-ci</code> required trên dev/main: 100%</li>
+        <li>PR merge với red/missing required-ci: 0</li>
+        <li>Stale last-success &lt; 8d</li>
+        <li>Open có đúng 1 <code>horizon:*</code>: ≥95% sau 14d (nay 0/18)</li>
+        <li>Sampled Project Horizon == label: 20/20</li>
+        <li><code>horizon:now</code> open WIP = 1 (fail nếu 0 hoặc &gt;1 &gt;7d)</li>
+        <li><code>checks --json has ritual check</code> = true sau tuần 2</li>
+      </ul>
+    </div>
+  </div>
+
+  <h2 class="h2">5 — Trade-offs (honest)</h2>
+  <p class="muted" style="font-size:13px">D/A tự stamp <code>ritual:gate-passed</code> (solo 0 reviews) — automation không ngăn hotfix bypass, chỉ audit. Calendar (B/C) rẻ nhưng silent bypass. Dashboard (E) theater nếu CI 93% xanh che Horizon 0/18. Board private giữ outsiders chỉ thấy ROADMAP — chấp nhận đến khi publicize + audit 106 items.</p>
+
+  <h2 class="h2">6 — Artifacts</h2>
+  <p class="muted" style="font-size:13px">HTML này: <code>plans/reports/brainstorm-260823-roadmap-stability-ultra.html</code> · Research: 4 scouts · Prior: <code>brainstorm-260823-roadmap-overview.html</code> + <code>brainstorm-260823-configurations-ui.html</code> · Next: patch workflows ở synthesis, rồi PR <code>chore/branching-workflow-doc → dev</code> với ROADMAP+RITUAL đã land workflow.</p>
+</div>
+</body>
+</html>
