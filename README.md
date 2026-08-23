@@ -38,7 +38,7 @@ Claude Code / Codex CLI
   own pinned Node.js runtime and do not require sudo, npm, or pnpm.
 
 
-Current development is on `v0.2.0-beta.8` (`dev@90ab106`) after hardening follow-up #168 (per-pool lock, prepare cache, affinity in-memory, ledger retention 90d, governance hash index). `v0.1.0` remains the last Stable release with a qualified Linux x86-64 artifact.
+Current development is on `v0.2.0-beta.8` (`dev@90ab106`) after hardening follow-up #168 (per-pool lock, prepare cache, affinity in-memory, ledger retention 90d, governance hash index). `v0.1.0` remains the last Stable release with a qualified Linux x86-64 artifact. Roadmap: [`ROADMAP.md`](ROADMAP.md) (Now/Next/Later, live board [Project 4](https://github.com/users/trungtaottn/projects/4)) · Ritual: [`docs/RITUAL.md`](docs/RITUAL.md).
 
 * **Stable (`main`):** `v0.1.0` — qualified Linux x86-64, Ed25519-signed metadata + SBOM + provenance. Default branch when opening the repo.
 * **Development (`dev`):** `v0.2.0-beta.x` — active integration, PR target. `dev → main` promotion via release PRs (`release-beta/stable.yml`).
