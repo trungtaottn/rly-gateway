@@ -6,11 +6,12 @@ const workflow = await readFile(".github/workflows/ci.yml", "utf8");
 const required = [
   [/pull_request:\n\s+branches: \[dev, main\]/, "PR targets dev and main"],
   [/types: \[opened, synchronize, reopened, ready_for_review, edited\]/, "PR-title edit trigger"],
-  [/name: conventional-commit/, "Conventional Commit title gate"],
-  [/name: required-ci\n\s+if: \$\{\{ always\(\) \}\}\n\s+needs: \[conventional-commit, verify\]/, "always-run aggregate dependencies"],
+  [/name: required-ci\n\s+if: \$\{\{ always\(\) \}\}\n\s+needs: \[.*conventional-commit.*verify.*\]/, "always-run aggregate dependencies"],
   [/TITLE_RESULT: \$\{\{ needs\.conventional-commit\.result \}\}/, "aggregate title result"],
+  [/RITUAL_RESULT: \$\{\{ needs\.ritual-gate\.result \}\}/, "aggregate ritual result"],
   [/VERIFY_RESULT: \$\{\{ needs\.verify\.result \}\}/, "aggregate verify result"],
   [/test "\$TITLE_RESULT" = success/, "aggregate title success guard"],
+  [/test "\$RITUAL_RESULT" = success/, "aggregate ritual success guard"],
   [/test "\$VERIFY_RESULT" = success/, "aggregate verify success guard"],
 ];
 for (const [pattern, description] of required) {
