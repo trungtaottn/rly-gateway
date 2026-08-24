@@ -32,6 +32,9 @@ Closes #
 - Breaking change: yes / no
 - Release note:
 
-## Review notes
+## Ritual
 
-<!-- Call out risky code, residual gaps, or exact manual verification. -->
+- [ ] Ritual brief: `plans/reports/brainstorm-*.html` link or `Ritual: n/a` (required when `src/management/**` or `src/control-plane/**` changed)
+- [ ] Project 4: `Horizon`/`Pillar` set, `horizon:now` WIP = 1
+
+## Review notes

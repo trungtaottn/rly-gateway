@@ -22,6 +22,24 @@ jobs:
             exit 1
           fi
 
+  ritual-gate:
+    name: ritual-gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            ui: ['src/management/**', 'src/control-plane/**', 'ROADMAP.md', 'docs/RITUAL.md']
+      - name: Require ritual brief or n/a
+        if: steps.filter.outputs.ui == 'true'
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          if echo "$PR_BODY" | grep -qE "plans/reports/brainstorm-|Ritual: n/a"; then exit 0; fi
+          echo "UI/config change needs plans/reports/brainstorm-*.html link or Ritual: n/a" >&2; exit 1
+
   verify:
     name: verify
     runs-on: macos-latest
@@ -47,13 +65,15 @@ jobs:
   required-ci:
     name: required-ci
     if: ${{ always() }}
-    needs: [conventional-commit, verify]
+    needs: [conventional-commit, ritual-gate, verify]
     runs-on: ubuntu-latest
     steps:
       - name: Reject failed, cancelled, or skipped validation
         env:
           TITLE_RESULT: ${{ needs.conventional-commit.result }}
+          RITUAL_RESULT: ${{ needs.ritual-gate.result }}
           VERIFY_RESULT: ${{ needs.verify.result }}
         run: |
           test "$TITLE_RESULT" = success
+          test "$RITUAL_RESULT" = success || test "$RITUAL_RESULT" = skipped
           test "$VERIFY_RESULT" = success

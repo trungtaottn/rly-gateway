@@ -1,0 +1,5 @@
+# CODEOWNERS — ritual gate + release trust boundary
+.github/** @trungtaottn
+scripts/release/** @trungtaottn
+scripts/sync-project-board.sh @trungtaottn
+scripts/check-*.mjs @trungtaottn

@@ -28,18 +28,18 @@ only and must not be committed.
 
 ## Branch and pull-request workflow
 
+Default branch when opening the repo is `main` (landing page). Active development happens on `dev`:
+
 1. Branch from the latest `dev` using `feat/`, `fix/`, `test/`, `docs/`, or
-   `chore/` plus a descriptive name.
+   `chore/` plus a descriptive name (`git checkout dev && git pull && git checkout -b fix/...`).
 2. Add focused tests before or with the implementation.
 3. Run the narrowest relevant test, then `pnpm verify` for shared behavior.
 4. Use Conventional Commit messages and a Conventional Commit-compatible PR
    title.
-5. Open the PR against `dev` and complete the repository template with exact
+5. Open the PR against `dev` (not `main`) and complete the repository template with exact
    commands and results.
 
-Do not force-push `dev` or `main`. Stable promotion is performed from a
-verified `dev` state into `main`.
-
+Do not force-push `dev` or `main`. Stable promotion is `dev → main` via a dedicated release PR after `dev` is verified. Never open a feature PR directly against `main`.
 ## Engineering expectations
 
 - Preserve Anthropic Messages and OpenAI Responses streaming, tool, reasoning,
@@ -55,17 +55,20 @@ verified `dev` state into `main`.
 
 ## Verification
 
+Run the narrowest relevant suite first, then the full gate for shared changes:
+
 ```bash
-pnpm test:unit
-pnpm test:contract
-pnpm test:integration
-pnpm test:lifecycle
-pnpm test:privacy
-pnpm test:standalone
+pnpm test:unit              # unit, registry, installer
+pnpm test:contract           # protocol fidelity + provider contracts
+pnpm test:integration        # fake upstream chaos
+pnpm test:lifecycle          # Fastify inject wiring
+pnpm test:privacy            # secret-free invariants + repo scan (13 suites)
+pnpm test:browser            # AT-031 keyboard/a11y/secret-free DOM
+pnpm test:release            # supply-chain + package inventory + clean-install smoke
 pnpm lint
 pnpm typecheck
 pnpm build
-pnpm verify
+pnpm verify                  # lint → typecheck → test → test:browser → build → test:privacy → test:release
 ```
 
 A skipped or unavailable check is not a pass. Explain the gap in the PR.

@@ -30,25 +30,26 @@ Claude Code / Codex CLI
 - Discover Claude-compatible `claude-rly-*` model projections through the
   authenticated `/v1/models` gateway surface.
 - Inspect the actual request-time provider and physical model with
-  `rly route-trace`.
+  `rly route-trace` and billing cost with `rly cost --since 7d --group-by model`.
 - Manage providers, accounts, pools, profiles, quota, and traces through a
-  loopback-only Config UI.
+  loopback-only Config UI; govern access via `rly_…` keys with budget/RPM/allowedModels.
+- Adaptive per-pool routing (EWMA + quota-aware), token-limit preflight, and 90d ledger retention on top of the local SQLite control plane.
 - Install a self-contained per-user runtime. Released artifacts bundle their
   own pinned Node.js runtime and do not require sudo, npm, or pnpm.
 
-## Release availability
 
-The v0.1.0 Stable release publishes a qualified Linux x86-64 artifact. macOS
-Apple Silicon, macOS Intel, and Linux ARM64 builds remain experimental and are
-not published to Stable until each target passes the same exact-byte gates on
-a matching provisioned runner. The resident Linux service requires a reachable
-`systemd --user` manager. RLY does not enable lingering or install a root service.
+Current development is on `v0.2.0-beta.8` (`dev@90ab106`) after hardening follow-up #168 (per-pool lock, prepare cache, affinity in-memory, ledger retention 90d, governance hash index). `v0.1.0` remains the last Stable release with a qualified Linux x86-64 artifact. Roadmap: [`ROADMAP.md`](ROADMAP.md) (Now/Next/Later, live board [Project 4](https://github.com/users/trungtaottn/projects/4)) · Ritual: [`docs/RITUAL.md`](docs/RITUAL.md).
+
+* **Stable (`main`):** `v0.1.0` — qualified Linux x86-64, Ed25519-signed metadata + SBOM + provenance. Default branch when opening the repo.
+* **Development (`dev`):** `v0.2.0-beta.x` — active integration, PR target. `dev → main` promotion via release PRs (`release-beta/stable.yml`).
+* **Experimental targets:** macOS Apple Silicon/Intel and Linux ARM64 remain experimental until exact-byte gates pass on matching runners. Resident Linux service requires a reachable `systemd --user` manager; no lingering/root service.
 
 ## Install
 
 The stable bootstrap verifies signed channel metadata, the signed release
 manifest, the artifact checksum, its Ed25519 signature, and its unpacked tree
 before installation.
+
 
 ```bash
 curl -fsSLO https://github.com/trungtaottn/RLY-Gateway/releases/latest/download/install.sh
@@ -231,7 +232,6 @@ resuming work.
   mutation targets.
 
 Report vulnerabilities privately as described in [SECURITY.md](./SECURITY.md).
-
 ## Development
 
 Source development requires Node.js 24 and pnpm 11.16:
@@ -244,12 +244,14 @@ pnpm dev doctor
 pnpm verify
 ```
 
-The public branch model is:
+Branch model (see `CONTRIBUTING.md`):
 
-- `dev`: active development and pull-request target
-- `main`: stable, releasable snapshots
+* **Default branch (landing):** `main` — what you see when opening the repo.
+* **Integration branch:** `dev` — PR target for `feat/*`, `fix/*`, `perf/*`, `chore/*` (branch from latest `dev`).
+* **Release flow:** `feature → dev` (review + `pnpm verify`) → `dev → main` via dedicated release PR. Never `feature → main` directly.
 
 See [CONTRIBUTING.md](./CONTRIBUTING.md) before opening a pull request.
+
 
 ## Release integrity
 
