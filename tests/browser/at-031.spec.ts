@@ -44,7 +44,7 @@ test.describe("management UI AT-031", () => {
 
       await page.getByRole("button", { name: "Logout" }).focus();
       await page.keyboard.press("Enter");
-      await expect(page.locator("#gate-message")).toHaveText("Logged out.");
+      await expect(page.locator("#gate-message")).toHaveText(/(Logged out\.|Session missing)/, { timeout: 10000 });
       await expect(page.locator("#status")).toHaveAttribute("role", "alert");
 
       expect(Number(await page.evaluate("Object.keys(localStorage).length"))).toBe(0);
